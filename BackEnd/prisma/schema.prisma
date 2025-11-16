@@ -1,0 +1,177 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql" // or "prostege"
+  url      = env("DATABASE_URL")
+}
+
+model PendingUser {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  password  String
+  otp       String
+  otpExpiry DateTime
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  picture   String?
+  password  String? // for admin/supplier logins
+  role      Role     @default(CUSTOMER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  supplier   Supplier?  @relation(fields: [supplierId], references: [id])
+  supplierId Int?
+  orders     Order[]
+  auditLogs  AuditLog[]
+}
+
+enum Role {
+  ADMIN
+  SUPPLIER
+  DISTRIBUTOR
+  RETAILER
+  CUSTOMER
+}
+
+model Supplier {
+  id          Int      @id @default(autoincrement())
+  companyName String
+  contact     String
+  address     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  products  Product[]
+  users     User[]
+  shipments Shipment[]
+}
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  category    String
+  batchNo     String
+  qrCode      String?  @unique
+  description String?
+  price       Float
+  stock       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  supplierId       Int
+  supplier         Supplier           @relation(fields: [supplierId], references: [id])
+  orders           Order[]
+  WarehouseProduct WarehouseProduct[]
+}
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  orderDate   DateTime    @default(now())
+  quantity    Int
+  status      OrderStatus @default(PENDING)
+  totalAmount Float
+
+  // Relationships
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  customerId Int
+  customer   User @relation(fields: [customerId], references: [id])
+
+  shipment Shipment?
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Shipment {
+  id                   Int            @id @default(autoincrement())
+  shipmentDate         DateTime       @default(now())
+  deliveryStatus       ShipmentStatus @default(PENDING)
+  transporter          String
+  qrCode               String?        @unique
+  verifiedByBlockchain Boolean        @default(false)
+
+  // Relationships
+  orderId Int   @unique
+  order   Order @relation(fields: [orderId], references: [id])
+
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  trackingEvents TrackingEvent[]
+}
+
+enum ShipmentStatus {
+  PENDING
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+}
+
+model TrackingEvent {
+  id          Int      @id @default(autoincrement())
+  location    String
+  timestamp   DateTime @default(now())
+  description String?
+  verified    Boolean  @default(false)
+  hash        String? // For blockchain-like verification
+  prevHash    String?
+  createdAt   DateTime @default(now())
+
+  // Relationships
+  shipmentId Int
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+}
+
+model Warehouse {
+  id          Int      @id @default(autoincrement())
+  location    String
+  capacity    Int
+  currentLoad Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  // Relationships
+  storedProducts WarehouseProduct[]
+}
+
+model WarehouseProduct {
+  id          Int @id @default(autoincrement())
+  warehouseId Int
+  productId   Int
+  quantity    Int @default(0)
+
+  // Relationships
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id])
+}
+
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  entityChanged String
+  action        String
+  timestamp     DateTime @default(now())
+  details       String?
+
+  // Relationships
+  userId Int
+  user   User @relation(fields: [userId], references: [id])
+}

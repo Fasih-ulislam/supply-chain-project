@@ -1,0 +1,61 @@
+import prisma from "../config/database.js";
+import bcrypt from "bcrypt";
+
+// 🟩 Create a new user (used for manual signup or admin panel)
+export async function createUser(data) {
+  const { password, ...rest } = data;
+
+  let hashedPassword;
+  if (password) {
+    hashedPassword = await bcrypt.hash(password, 10);
+  }
+
+  return prisma.user.create({
+    data: {
+      ...rest,
+      password: hashedPassword,
+    },
+  });
+}
+
+// 🟦 Get all users (admin-only)
+export async function getAllUsers() {
+  return prisma.user.findMany({
+    include: {
+      supplier: true,
+      orders: true,
+    },
+  });
+}
+
+// 🟨 Get user by ID
+export async function getUserById(id) {
+  return prisma.user.findUnique({
+    where: { id },
+    include: {
+      supplier: true,
+      orders: true,
+    },
+  });
+}
+
+// 🟧 Get user by email (useful for login)
+export async function getUserByEmail(email) {
+  return prisma.user.findUnique({ where: { email } });
+}
+
+// 🟥 Update user info
+export async function updateUser(id, data) {
+  if (data.password) {
+    data.password = await bcrypt.hash(data.password, 10);
+  }
+  return prisma.user.update({
+    where: { id },
+    data,
+  });
+}
+
+// ⬛ Delete user
+export async function deleteUser(id) {
+  return prisma.user.delete({ where: { id } });
+}
