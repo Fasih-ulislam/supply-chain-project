@@ -1,13 +1,17 @@
 import express from "express";
 import * as userController from "../controllers/user.controller.js";
+import { authorizeRoles } from "../middlewares/validate.user.middleware.js";
 
 const router = express.Router();
 
-router.post("/", userController.createUser);
-router.get("/", userController.getAllUsers);
-router.get("/:id", userController.getUserById);
-router.get("/email/:email", userController.getUserByEmail);
-router.put("/:id", userController.updateUser);
-router.delete("/:id", userController.deleteUser);
+router.use(
+  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER")
+);
+router.get("/", userController.getUserByEmail);
+router.put("/", userController.updateUser);
+router.delete("/", userController.deleteUser);
+
+router.use(authorizeRoles("ADMIN"));
+router.get("/all", userController.getAllUsers);
 
 export default router;

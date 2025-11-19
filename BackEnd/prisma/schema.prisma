@@ -9,6 +9,28 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model RoleRequest {
+  id              Int           @id @default(autoincrement())
+  userId          Int
+  requestedRole   Role // SUPPLIER, DISTRIBUTOR, RETAILER
+  businessName    String
+  businessAddress String
+  contactNumber   String
+  NTN             String? // optional
+  status          RequestStatus @default(PENDING)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model PendingUser {
   id        Int      @id @default(autoincrement())
   email     String   @unique
@@ -25,15 +47,26 @@ model User {
   email     String   @unique
   picture   String?
   password  String? // for admin/supplier logins
-  role      Role     @default(CUSTOMER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relationships
-  supplier   Supplier?  @relation(fields: [supplierId], references: [id])
-  supplierId Int?
-  orders     Order[]
-  auditLogs  AuditLog[]
+  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
+  supplierId   Int?          @unique
+  orders       Order[]
+  userRoles    UserRole[]
+  roleRequests RoleRequest[]
+  auditLogs    AuditLog[]
+}
+
+model UserRole {
+  id     Int  @id @default(autoincrement())
+  userId Int
+  role   Role
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, role]) // user cannot duplicate a role
 }
 
 enum Role {
@@ -54,7 +87,7 @@ model Supplier {
 
   // Relationships
   products  Product[]
-  users     User[]
+  user      User?
   shipments Shipment[]
 }
 

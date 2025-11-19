@@ -8,81 +8,110 @@ function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// 🟦 Send OTP (mock for now)
+// 🟦 Send OTP
 async function sendOtpEmail(email, otp) {
   await transporter.sendMail(
     mailOptions(
       email,
       "Your OTP Code",
       `Your OTP is ${otp}`,
-      `<p>Your OTP code is <b>${otp}</b>. It will expire in 5 minutes.</p>`
+      `<p>Your OTP code is <b>${otp}</b>. It will expire in 10 minutes.</p>`
     )
   );
 }
 
-//Login User
+// --------------------------------------------------------
+// 🔐 LOGIN USER (NO TRANSACTION NEEDED)
+// --------------------------------------------------------
 export async function loginUser({ email, password }) {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({
+    where: { email },
+    include: { userRoles: true },
+  });
+
   if (!user) throw new ResponseError("Invalid Credentials");
   if (!(await bcrypt.compare(password, user.password)))
     throw new ResponseError("Invalid Credentials");
+
   return user;
 }
 
-// 🟨 Register new user (Step 1: send OTP)
+// --------------------------------------------------------
+// 🟨 REGISTER USER (USE TRANSACTION)
+// --------------------------------------------------------
 export async function registerUser({ name, email, password }) {
-  // 1️⃣ Check if user already exists in main table
+  // Check if already registered
   const existingUser = await prisma.user.findUnique({ where: { email } });
   if (existingUser) throw new ResponseError("User already exists", 409);
 
-  // 2️⃣ Hash password
   const hashedPassword = await bcrypt.hash(password, 10);
   const otp = generateOtp();
-
-  // 3️⃣ Check if already pending → overwrite
-  const existingPending = await prisma.pendingUser.findUnique({
-    where: { email },
-  });
-  if (existingPending) {
-    await prisma.pendingUser.delete({ where: { email } });
-  }
-
-  // 4️⃣ Create pending user entry
   const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-  await prisma.pendingUser.create({
-    data: { name, email, password: hashedPassword, otp, otpExpiry },
+
+  // Transaction ensures: delete old pending + create new pending is atomic
+  await prisma.$transaction(async (tx) => {
+    // Delete old pending entry if exists
+    await tx.pendingUser.deleteMany({ where: { email } });
+
+    // Create new pending entry
+    await tx.pendingUser.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        otp,
+        otpExpiry,
+      },
+    });
   });
 
-  // 5️⃣ Send OTP (currently logs to console)
   await sendOtpEmail(email, otp);
 
   return { message: "OTP sent to email" };
 }
 
-// 🟧 Verify OTP (Step 2: confirm + move to main User)
+// --------------------------------------------------------
+// 🟩 VERIFY OTP (STRONG TRANSACTION REQUIRED)
+// --------------------------------------------------------
 export async function verifyOtp({ email, otp }) {
   const pendingUser = await prisma.pendingUser.findUnique({ where: { email } });
   if (!pendingUser) throw new ResponseError("No pending user found", 404);
 
-  // 1️⃣ Check OTP and expiry
+  // Check OTP
   if (pendingUser.otp !== otp) throw new ResponseError("Invalid OTP", 401);
+
+  // Check expiry
   if (new Date() > pendingUser.otpExpiry) {
     await prisma.pendingUser.delete({ where: { email } });
     throw new ResponseError("OTP expired. Please register again.", 401);
   }
 
-  // 2️⃣ Move user to main User table
-  const newUser = await prisma.user.create({
-    data: {
-      name: pendingUser.name,
-      email: pendingUser.email,
-      password: pendingUser.password,
-      role: "CUSTOMER", // default role
-    },
-  });
+  // Transaction ensures atomic user creation + role assignment + pending cleanup
+  const newUser = await prisma.$transaction(async (tx) => {
+    // Create main user
+    const createdUser = await tx.user.create({
+      data: {
+        name: pendingUser.name,
+        email: pendingUser.email,
+        password: pendingUser.password,
+      },
+    });
 
-  // 3️⃣ Clean up pending record
-  await prisma.pendingUser.delete({ where: { email } });
+    // Assign default role
+    await tx.userRole.create({
+      data: {
+        role: "CUSTOMER",
+        userId: createdUser.id,
+      },
+    });
+
+    // Delete pending entry
+    await tx.pendingUser.delete({
+      where: { email },
+    });
+
+    return createdUser;
+  });
 
   return newUser;
 }

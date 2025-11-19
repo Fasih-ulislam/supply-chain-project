@@ -15,7 +15,13 @@ export async function registerUser(req, res, next) {
     const { error } = pendingUserSchema.validate(req.body);
     if (error) throw new ResponseError(error.details[0].message, 400);
 
-    const response = await authService.registerUser({ name, email, password });
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const response = await authService.registerUser({
+      name,
+      email: normalizedEmail,
+      password,
+    });
 
     res.status(200).json(response);
   } catch (err) {
@@ -30,13 +36,20 @@ export async function loginUser(req, res, next) {
     if (!email || !password)
       throw new ResponseError("Required fields not filled.", 400);
 
-    const user = await authService.loginUser({ email, password });
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await authService.loginUser({
+      email: normalizedEmail,
+      password,
+    });
 
     //MAIN TOKEN
     const token = jwt.sign(
       {
+        supplierId: user.supplierId,
+        id: user.id,
         email: user.email,
-        role: user.role,
+        userRoles: user.userRoles,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
@@ -52,9 +65,8 @@ export async function loginUser(req, res, next) {
     res.status(200).json({
       message: "Login successful",
       user: {
-        name: user.name,
         email: user.email,
-        role: user.role,
+        roles: user.userRoles,
       },
     });
   } catch (err) {
@@ -62,10 +74,16 @@ export async function loginUser(req, res, next) {
   }
 }
 
+export const logoutUser = (req, res, next) => {
+  res.clearCookie("token");
+  res.status(200).json("Logout Successfull");
+};
+
 export async function verifyOtp(req, res, next) {
   try {
     const { email, otp } = req.body;
-    const user = await authService.verifyOtp({ email, otp });
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await authService.verifyOtp({ email: normalizedEmail, otp });
     res.status(201).json({ message: "User verified successfully", user });
   } catch (err) {
     next(err);

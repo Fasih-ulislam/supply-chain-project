@@ -40,10 +40,9 @@ export async function getUserById(req, res, next) {
 // 🟧 Get user by email (for login or lookup)
 export async function getUserByEmail(req, res, next) {
   try {
-    const { email } = req.params;
-    console.log(email);
+    const data = req.user;
 
-    const user = await userService.getUserByEmail(email);
+    const user = await userService.getUserByEmail(data.email);
     if (!user) throw new ResponseError("User doesn't exist", 404);
     res.json(user);
   } catch (err) {
@@ -57,8 +56,8 @@ export async function updateUser(req, res, next) {
     const { error } = userUpdateSchema.validate(req.body);
     if (error) throw new ResponseError(error.details[0].message, 400);
 
-    const id = parseInt(req.params.id);
-    const user = await userService.updateUser(id, req.body);
+    const data = req.user;
+    const user = await userService.updateUser(data.email, req.body);
     if (!user) throw new ResponseError("User doesn't exist", 404);
     res.json({ message: "User updated successfully", user });
   } catch (err) {
@@ -69,8 +68,8 @@ export async function updateUser(req, res, next) {
 // ⬛ Delete user
 export async function deleteUser(req, res, next) {
   try {
-    const id = parseInt(req.params.id);
-    const user = await userService.deleteUser(id);
+    const data = req.user;
+    const user = await userService.deleteUser(data.email);
     if (!user) throw new ResponseError("User doesn't exist", 404);
     res.json({ message: "User deleted successfully" });
   } catch (err) {

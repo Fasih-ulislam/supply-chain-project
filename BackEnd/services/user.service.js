@@ -24,6 +24,7 @@ export async function getAllUsers() {
     include: {
       supplier: true,
       orders: true,
+      userRoles: true,
     },
   });
 }
@@ -35,27 +36,35 @@ export async function getUserById(id) {
     include: {
       supplier: true,
       orders: true,
+      userRoles: true,
     },
   });
 }
 
 // 🟧 Get user by email (useful for login)
 export async function getUserByEmail(email) {
-  return prisma.user.findUnique({ where: { email } });
+  return prisma.user.findUnique({
+    where: { email },
+    include: {
+      supplier: true,
+      orders: true,
+      userRoles: true,
+    },
+  });
 }
 
 // 🟥 Update user info
-export async function updateUser(id, data) {
+export async function updateUser(email, data) {
   if (data.password) {
     data.password = await bcrypt.hash(data.password, 10);
   }
   return prisma.user.update({
-    where: { id },
+    where: { email },
     data,
   });
 }
 
 // ⬛ Delete user
-export async function deleteUser(id) {
-  return prisma.user.delete({ where: { id } });
+export async function deleteUser(email) {
+  return prisma.user.delete({ where: { email } });
 }
