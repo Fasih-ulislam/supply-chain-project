@@ -22,8 +22,6 @@ export async function createUser(data) {
 export async function getAllUsers() {
   return prisma.user.findMany({
     include: {
-      supplier: true,
-      orders: true,
       userRoles: true,
     },
   });
@@ -34,9 +32,11 @@ export async function getUserById(id) {
   return prisma.user.findUnique({
     where: { id },
     include: {
-      supplier: true,
-      orders: true,
       userRoles: true,
+      products: true,
+      inventories: true,
+      ordersMade: { take: 10, orderBy: { orderDate: "desc" } },
+      ordersReceived: { take: 10, orderBy: { orderDate: "desc" } },
     },
   });
 }
@@ -46,9 +46,11 @@ export async function getUserByEmail(email) {
   return prisma.user.findUnique({
     where: { email },
     include: {
-      supplier: true,
-      orders: true,
       userRoles: true,
+      products: true,
+      inventories: true,
+      ordersMade: { take: 10, orderBy: { orderDate: "desc" } },
+      ordersReceived: { take: 10, orderBy: { orderDate: "desc" } },
     },
   });
 }

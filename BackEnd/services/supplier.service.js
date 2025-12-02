@@ -1,100 +1,50 @@
 import prisma from "../config/database.js";
 
-// 🟩 Create supplier (transaction)
-export async function createSupplier(userId, data) {
-  return await prisma.$transaction(async (tx) => {
-    // 1. Create supplier
-    const supplier = await tx.supplier.create({
-      data,
-      include: {
-        user: true,
-      },
-    });
-
-    // 2. Assign supplier to the user
-    await tx.user.update({
-      where: { id: userId },
-      data: {
-        supplierId: supplier.id,
-      },
-    });
-
-    return supplier;
-  });
-}
-
-// 🟦 Get all suppliers (admin)
+// 🟦 Get all users with SUPPLIER role (admin)
 export async function getAllSuppliers() {
-  return await prisma.supplier.findMany({
-    include: {
-      users: true,
-      products: true,
-      shipments: true,
-    },
-  });
-}
-
-// 🟨 Get supplier by ID
-export async function getSupplierById(id) {
-  return await prisma.supplier.findUnique({
-    where: { id },
-    include: {
-      products: true,
-      shipments: true,
-    },
-  });
-}
-
-// 🟨 Get supplier by User ID
-export async function getSupplierByUserId(userId) {
-  return await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      supplier: true,
-    },
-  });
-}
-
-// 🟨 Update supplier by User ID
-export async function updateSupplierByUserId(userId, data) {
-  return await prisma.$transaction(async (tx) => {
-    const supplier = await tx.user.findUnique({
-      where: { id: userId },
-      select: {
-        supplier: true,
+  return await prisma.user.findMany({
+    where: {
+      userRoles: {
+        some: {
+          role: "SUPPLIER",
+        },
       },
-    });
-
-    if (!supplier || !supplier.supplier)
-      throw new ResponseError("Supplier not found", 404);
-    // 1. Unlink users
-    return await tx.supplier.update({
-      where: { id: supplier.supplier.id },
-      data: { ...data },
-    });
+    },
+    include: {
+      userRoles: true,
+      products: true,
+      ordersReceived: true,
+    },
   });
 }
 
-// 🟧 Update supplier
-export async function updateSupplier(id, data) {
-  return await prisma.supplier.update({
+// 🟨 Get supplier (user) by ID
+export async function getSupplierById(id) {
+  return await prisma.user.findUnique({
     where: { id },
-    data,
+    include: {
+      userRoles: true,
+      products: true,
+      ordersReceived: {
+        include: {
+          product: true,
+          buyer: true,
+        },
+      },
+    },
   });
 }
 
-// ⬛ Delete supplier (transaction)
-export async function deleteSupplier(id) {
-  return await prisma.$transaction(async (tx) => {
-    // 1. Unlink users
-    await tx.user.updateMany({
-      where: { supplierId: id },
-      data: { supplierId: null },
-    });
+// 🟧 Update supplier (user) data
+export async function updateSupplier(id, data) {
+  // Remove role-related fields if present, as roles should be managed separately
+  const { userRoles, ...updateData } = data;
 
-    // 2. Delete supplier
-    return await tx.supplier.delete({
-      where: { id },
-    });
+  return await prisma.user.update({
+    where: { id },
+    data: updateData,
+    include: {
+      userRoles: true,
+    },
   });
 }

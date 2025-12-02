@@ -1,22 +1,12 @@
 import * as supplierService from "../services/supplier.service.js";
-import { supplierSchema, supplierUpdateSchema } from "../utils/validation.js";
+import { userUpdateSchema } from "../utils/validation.js";
 import ResponseError from "../utils/customError.js";
 
-// 🟩 Create supplier (admin)
-export async function createSupplier(req, res, next) {
-  try {
-    const { error } = supplierSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
-    const userId = req.user.id; // admin performing action
-    const supplier = await supplierService.createSupplier(userId, req.body);
-
-    res
-      .status(201)
-      .json({ message: "Supplier created successfully", supplier });
-  } catch (err) {
-    next(err);
-  }
+// Helper to check if user has a specific role
+function hasRole(user, role) {
+  return (
+    Array.isArray(user.userRoles) && user.userRoles.some((r) => r.role === role)
+  );
 }
 
 // 🟦 Get all suppliers (admin)
@@ -43,21 +33,20 @@ export async function getSupplierById(req, res, next) {
   }
 }
 
-// 🟨 Get My Supplier Data
+// 🟨 Get My Supplier Data (current user with SUPPLIER role)
 export async function getMySupplierData(req, res, next) {
   try {
-    const user = req.user;
-    if (!user.supplierId) {
+    if (!hasRole(req.user, "SUPPLIER")) {
       return res
         .status(403)
-        .json({ message: "Access denied: insufficient permissions" });
+        .json({ message: "Access denied: You are not a supplier" });
     }
-    const supplier = await supplierService.getSupplierById(user.supplierId);
 
-    if (!supplier || !supplier.supplier)
-      throw new ResponseError("Supplier not found", 404);
+    const supplier = await supplierService.getSupplierById(req.user.id);
 
-    res.json(supplier.supplier);
+    if (!supplier) throw new ResponseError("Supplier not found", 404);
+
+    res.json(supplier);
   } catch (err) {
     next(err);
   }
@@ -66,54 +55,21 @@ export async function getMySupplierData(req, res, next) {
 // 🟨 Update my Supplier data
 export async function updateMySupplierData(req, res, next) {
   try {
-    const user = req.user;
-
-    if (!user.supplierId) {
+    if (!hasRole(req.user, "SUPPLIER")) {
       return res
         .status(403)
-        .json({ message: "Access denied: insufficient permissions" });
+        .json({ message: "Access denied: You are not a supplier" });
     }
 
-    const { error } = supplierUpdateSchema.validate(req.body);
+    const { error } = userUpdateSchema.validate(req.body);
     if (error) throw new ResponseError(error.details[0].message, 400);
 
     const supplier = await supplierService.updateSupplier(
-      user.supplierId,
+      req.user.id,
       req.body
     );
 
     res.json(supplier);
-  } catch (err) {
-    next(err);
-  }
-}
-
-// 🟧 Update supplier
-export async function updateSupplier(req, res, next) {
-  try {
-    const { error } = supplierUpdateSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
-    const id = parseInt(req.params.id);
-
-    const supplier = await supplierService.updateSupplier(id, req.body);
-    if (!supplier) throw new ResponseError("Supplier not found", 404);
-
-    res.json({ message: "Supplier updated successfully", supplier });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// ⬛ Delete supplier
-export async function deleteSupplier(req, res, next) {
-  try {
-    const id = parseInt(req.params.id);
-
-    const supplier = await supplierService.deleteSupplier(id);
-    if (!supplier) throw new ResponseError("Supplier not found", 404);
-
-    res.json({ message: "Supplier deleted successfully" });
   } catch (err) {
     next(err);
   }

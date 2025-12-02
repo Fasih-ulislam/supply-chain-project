@@ -1,5 +1,6 @@
 import prisma from "../config/database.js";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import ResponseError from "../utils/customError.js";
 import { transporter, mailOptions } from "../config/nodemailer.js";
 
@@ -29,9 +30,9 @@ export async function loginUser({ email, password }) {
     include: { userRoles: true },
   });
 
-  if (!user) throw new ResponseError("Invalid Credentials");
+  if (!user) throw new ResponseError("Invalid Credentials", 401);
   if (!(await bcrypt.compare(password, user.password)))
-    throw new ResponseError("Invalid Credentials");
+    throw new ResponseError("Invalid Credentials", 401);
 
   return user;
 }
@@ -77,14 +78,18 @@ export async function verifyOtp({ email, otp }) {
   const pendingUser = await prisma.pendingUser.findUnique({ where: { email } });
   if (!pendingUser) throw new ResponseError("No pending user found", 404);
 
-  // Check OTP
-  if (pendingUser.otp !== otp) throw new ResponseError("Invalid OTP", 401);
-
-  // Check expiry
+  // Check expiry first
   if (new Date() > pendingUser.otpExpiry) {
     await prisma.pendingUser.delete({ where: { email } });
     throw new ResponseError("OTP expired. Please register again.", 401);
   }
+
+  // Timing-safe OTP comparison to prevent timing attacks
+  const otpBuffer = Buffer.from(otp.padEnd(6, "0"));
+  const storedOtpBuffer = Buffer.from(pendingUser.otp.padEnd(6, "0"));
+  const isValidOtp = crypto.timingSafeEqual(otpBuffer, storedOtpBuffer);
+
+  if (!isValidOtp) throw new ResponseError("Invalid OTP", 401);
 
   // Transaction ensures atomic user creation + role assignment + pending cleanup
   const newUser = await prisma.$transaction(async (tx) => {

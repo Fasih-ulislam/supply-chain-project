@@ -1,28 +1,25 @@
-// schema.prisma
-
+// -----------------------------------------------------
+// GENERATOR + DATASOURCE
+// -----------------------------------------------------
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "mysql" // or "prostege"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
-model RoleRequest {
-  id              Int           @id @default(autoincrement())
-  userId          Int
-  requestedRole   Role // SUPPLIER, DISTRIBUTOR, RETAILER
-  businessName    String
-  businessAddress String
-  contactNumber   String
-  NTN             String? // optional
-  status          RequestStatus @default(PENDING)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+// -----------------------------------------------------
+// ENUMS
+// -----------------------------------------------------
 
-  // Relations
-  user User @relation(fields: [userId], references: [id])
+enum Role {
+  ADMIN
+  SUPPLIER
+  DISTRIBUTOR
+  RETAILER
+  CUSTOMER
 }
 
 enum RequestStatus {
@@ -30,6 +27,20 @@ enum RequestStatus {
   APPROVED
   REJECTED
 }
+
+enum OrderStatus {
+  PENDING // buyer created
+  APPROVED // seller approved
+  PROCESSING // seller preparing
+  IN_TRANSIT // transporter assigned
+  DELIVERED // buyer confirmed receipt
+  CANCELLED // buyer cancelled or seller rejected
+  RETURNED // seller marked as returned
+}
+
+// -----------------------------------------------------
+// USERS & AUTH
+// -----------------------------------------------------
 
 model PendingUser {
   id        Int      @id @default(autoincrement())
@@ -45,20 +56,22 @@ model User {
   id        Int      @id @default(autoincrement())
   name      String
   email     String   @unique
+  password  String
   picture   String?
-  password  String? // for admin/supplier logins
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Relationships
-  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
-  supplierId   Int?          @unique
-  orders       Order[]
-  userRoles    UserRole[]
-  roleRequests RoleRequest[]
-  auditLogs    AuditLog[]
+  userRoles      UserRole[]
+  roleRequests   RoleRequest[]
+  products       Product[]
+  inventories    Inventory[]
+  ordersMade     Order[]         @relation("buyerOrders")
+  ordersReceived Order[]         @relation("sellerOrders")
+  trackingFrom   TrackingEvent[] @relation("TrackingFromUser")
+  trackingTo     TrackingEvent[] @relation("TrackingToUser")
 }
 
+// MULTI-ROLE TABLE
 model UserRole {
   id     Int  @id @default(autoincrement())
   userId Int
@@ -66,31 +79,30 @@ model UserRole {
 
   user User @relation(fields: [userId], references: [id])
 
-  @@unique([userId, role]) // user cannot duplicate a role
+  @@unique([userId, role])
 }
 
-enum Role {
-  ADMIN
-  SUPPLIER
-  DISTRIBUTOR
-  RETAILER
-  CUSTOMER
+// ROLE REQUESTS
+model RoleRequest {
+  id              Int           @id @default(autoincrement())
+  userId          Int
+  requestedRole   Role
+  businessName    String
+  businessAddress String
+  contactNumber   String
+  NTN             String?
+  status          RequestStatus @default(PENDING)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
 }
 
-model Supplier {
-  id          Int      @id @default(autoincrement())
-  companyName String
-  contact     String
-  address     String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+// -----------------------------------------------------
+// PRODUCTS
+// -----------------------------------------------------
 
-  // Relationships
-  products  Product[]
-  user      User?
-  shipments Shipment[]
-}
-
+// Only suppliers can create products
 model Product {
   id          Int      @id @default(autoincrement())
   name        String
@@ -99,112 +111,92 @@ model Product {
   qrCode      String?  @unique
   description String?
   price       Float
-  stock       Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // Relationships
-  supplierId       Int
-  supplier         Supplier           @relation(fields: [supplierId], references: [id])
-  orders           Order[]
-  WarehouseProduct WarehouseProduct[]
+  createdById Int
+  createdBy   User @relation(fields: [createdById], references: [id])
+
+  inventories Inventory[]
+  orders      Order[]
 }
 
-model Order {
-  id          Int         @id @default(autoincrement())
-  orderDate   DateTime    @default(now())
-  quantity    Int
-  status      OrderStatus @default(PENDING)
-  totalAmount Float
+// -----------------------------------------------------
+// INVENTORY
+// -----------------------------------------------------
 
-  // Relationships
+model Inventory {
+  id        Int      @id @default(autoincrement())
+  userId    Int // owner of the inventory
+  productId Int
+  role      Role // SUPPLIER, DISTRIBUTOR, or RETAILER
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+  orders  Order[]
+
+  @@unique([userId, productId, role]) // prevents mixing stock
+}
+
+// -----------------------------------------------------
+// ORDER SYSTEM
+// -----------------------------------------------------
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  orderDate       DateTime    @default(now())
+  quantity        Int
+  totalAmount     Float
+  status          OrderStatus @default(PENDING)
+  deliveryAddress String
+
+  // RELATIONS
   productId Int
   product   Product @relation(fields: [productId], references: [id])
 
-  customerId Int
-  customer   User @relation(fields: [customerId], references: [id])
+  inventoryId Int
+  inventory   Inventory @relation(fields: [inventoryId], references: [id])
 
-  shipment Shipment?
-}
+  buyerId Int
+  buyer   User @relation("buyerOrders", fields: [buyerId], references: [id])
 
-enum OrderStatus {
-  PENDING
-  PROCESSING
-  SHIPPED
-  DELIVERED
-  CANCELLED
-}
+  sellerId Int
+  seller   User @relation("sellerOrders", fields: [sellerId], references: [id])
 
-model Shipment {
-  id                   Int            @id @default(autoincrement())
-  shipmentDate         DateTime       @default(now())
-  deliveryStatus       ShipmentStatus @default(PENDING)
-  transporter          String
-  qrCode               String?        @unique
-  verifiedByBlockchain Boolean        @default(false)
-
-  // Relationships
-  orderId Int   @unique
-  order   Order @relation(fields: [orderId], references: [id])
-
-  supplierId Int?
-  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+  transporterId Int?
+  transporter   Transporter? @relation(fields: [transporterId], references: [id])
 
   trackingEvents TrackingEvent[]
 }
 
-enum ShipmentStatus {
-  PENDING
-  IN_TRANSIT
-  DELIVERED
-  RETURNED
+// -----------------------------------------------------
+// TRANSPORTER
+// -----------------------------------------------------
+model Transporter {
+  id     Int     @id @default(autoincrement())
+  name   String
+  phone  String
+  orders Order[]
 }
+
+// -----------------------------------------------------
+// TRACKING EVENTS
+// -----------------------------------------------------
 
 model TrackingEvent {
   id          Int      @id @default(autoincrement())
-  location    String
-  timestamp   DateTime @default(now())
+  orderId     Int
+  fromUserId  Int?
+  toUserId    Int?
+  status      String // The status at this point (e.g., APPROVED, PROCESSING, etc.)
   description String?
-  verified    Boolean  @default(false)
-  hash        String? // For blockchain-like verification
-  prevHash    String?
-  createdAt   DateTime @default(now())
+  timestamp   DateTime @default(now())
 
-  // Relationships
-  shipmentId Int
-  shipment   Shipment @relation(fields: [shipmentId], references: [id])
-}
+  order Order @relation(fields: [orderId], references: [id])
 
-model Warehouse {
-  id          Int      @id @default(autoincrement())
-  location    String
-  capacity    Int
-  currentLoad Int      @default(0)
-  createdAt   DateTime @default(now())
-
-  // Relationships
-  storedProducts WarehouseProduct[]
-}
-
-model WarehouseProduct {
-  id          Int @id @default(autoincrement())
-  warehouseId Int
-  productId   Int
-  quantity    Int @default(0)
-
-  // Relationships
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
-  product   Product   @relation(fields: [productId], references: [id])
-}
-
-model AuditLog {
-  id            Int      @id @default(autoincrement())
-  entityChanged String
-  action        String
-  timestamp     DateTime @default(now())
-  details       String?
-
-  // Relationships
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
+  fromUser User? @relation("TrackingFromUser", fields: [fromUserId], references: [id])
+  toUser   User? @relation("TrackingToUser", fields: [toUserId], references: [id])
 }

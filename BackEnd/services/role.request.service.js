@@ -66,22 +66,6 @@ export async function updateRequestStatus(id, status) {
         },
       });
 
-      // If SUPPLIER → create supplier + assign it
-      if (requestedRole === "SUPPLIER") {
-        const supplier = await tx.supplier.create({
-          data: {
-            companyName: updatedRequest.businessName,
-            address: updatedRequest.businessAddress,
-            contact: updatedRequest.contactNumber,
-          },
-        });
-
-        await tx.user.update({
-          where: { id: userId },
-          data: { supplierId: supplier.id },
-        });
-      }
-
       return updatedRequest;
     }
 
@@ -95,25 +79,6 @@ export async function updateRequestStatus(id, status) {
         role: requestedRole,
       },
     });
-
-    // If SUPPLIER → delete supplier + unlink user
-    if (requestedRole === "SUPPLIER") {
-      const user = await tx.user.findUnique({
-        where: { id: userId },
-        select: { supplierId: true },
-      });
-
-      if (user?.supplierId) {
-        await tx.supplier.delete({
-          where: { id: user.supplierId },
-        });
-
-        await tx.user.update({
-          where: { id: userId },
-          data: { supplierId: null },
-        });
-      }
-    }
 
     return updatedRequest;
   });

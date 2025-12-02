@@ -22,13 +22,32 @@ export const validateUserMiddleware = async (req, res, next) => {
   }
 };
 
+// Authorize based on activeRole (single role at a time)
 export function authorizeRoles(...allowedRoles) {
   return (req, res, next) => {
-    const user = req.user; // assumes user is already attached via JWT middleware
+    const user = req.user;
+
+    // Check if user's activeRole is in the allowed roles
+    if (!user.activeRole || !allowedRoles.includes(user.activeRole)) {
+      return res.status(403).json({
+        message: `Access denied. Required roles: ${allowedRoles.join(
+          ", "
+        )}. Your active role: ${user.activeRole || "none"}`,
+      });
+    }
+
+    next();
+  };
+}
+
+// Check if user has ANY of the roles (for reading available roles)
+export function hasAnyRole(...roles) {
+  return (req, res, next) => {
+    const user = req.user;
 
     const hasAccess =
       Array.isArray(user.userRoles) &&
-      user.userRoles.some(({ role }) => allowedRoles.includes(role));
+      user.userRoles.some(({ role }) => roles.includes(role));
 
     if (!hasAccess) {
       return res
