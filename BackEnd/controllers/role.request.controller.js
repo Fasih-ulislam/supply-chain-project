@@ -1,20 +1,29 @@
 import * as roleRequestService from "../services/role.request.service.js";
 import ResponseError from "../utils/customError.js";
-import {
-  roleRequestSchema,
-  updateRoleStatusSchema,
-} from "../utils/validation.js";
 
 // 🟩 Create new role request
 export async function createRoleRequest(req, res, next) {
   try {
-    const user = req.user; // from auth middleware
+    const { requestedRole, businessName, businessAddress, phone } = req.body;
 
-    const { error } = roleRequestSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
+    if (
+      !requestedRole ||
+      !["SUPPLIER", "DISTRIBUTOR"].includes(requestedRole)
+    ) {
+      throw new ResponseError(
+        "Invalid role requested. Must be SUPPLIER or DISTRIBUTOR",
+        400
+      );
+    }
+    if (!businessName || !businessAddress) {
+      throw new ResponseError(
+        "businessName and businessAddress are required",
+        400
+      );
+    }
 
     const request = await roleRequestService.createRoleRequest(
-      user.id,
+      req.user.id,
       req.body
     );
 
@@ -78,15 +87,16 @@ export async function getRoleRequestById(req, res, next) {
 // 🟥 Approve or Reject request (admin-only)
 export async function updateRoleRequestStatus(req, res, next) {
   try {
-    const { id } = req.params;
-
-    const { error } = updateRoleStatusSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) throw new ResponseError("Invalid request ID", 400);
 
     const { status } = req.body;
+    if (!status || !["APPROVED", "REJECTED"].includes(status)) {
+      throw new ResponseError("Status must be APPROVED or REJECTED", 400);
+    }
 
     const updatedRequest = await roleRequestService.updateRequestStatus(
-      parseInt(id),
+      id,
       status
     );
 

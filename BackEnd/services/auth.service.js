@@ -27,7 +27,10 @@ async function sendOtpEmail(email, otp) {
 export async function loginUser({ email, password }) {
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { userRoles: true },
+    include: {
+      supplierProfile: true,
+      distributorProfile: true,
+    },
   });
 
   if (!user) throw new ResponseError("Invalid Credentials", 401);
@@ -48,6 +51,8 @@ export async function registerUser({ name, email, password }) {
   const hashedPassword = await bcrypt.hash(password, 10);
   const otp = generateOtp();
   const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+  console.log(otp);
 
   // Transaction ensures: delete old pending + create new pending is atomic
   await prisma.$transaction(async (tx) => {
@@ -91,22 +96,16 @@ export async function verifyOtp({ email, otp }) {
 
   if (!isValidOtp) throw new ResponseError("Invalid OTP", 401);
 
-  // Transaction ensures atomic user creation + role assignment + pending cleanup
+  // Transaction ensures atomic user creation + pending cleanup
+  // New users default to CUSTOMER role (single role per account)
   const newUser = await prisma.$transaction(async (tx) => {
-    // Create main user
+    // Create main user with default CUSTOMER role
     const createdUser = await tx.user.create({
       data: {
         name: pendingUser.name,
         email: pendingUser.email,
         password: pendingUser.password,
-      },
-    });
-
-    // Assign default role
-    await tx.userRole.create({
-      data: {
-        role: "CUSTOMER",
-        userId: createdUser.id,
+        role: "CUSTOMER", // Default role - single role per account
       },
     });
 

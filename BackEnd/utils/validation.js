@@ -66,9 +66,7 @@ export const otpSchema = Joi.object({
 // =====================================================
 
 export const roleRequestSchema = Joi.object({
-  requestedRole: Joi.string()
-    .valid("SUPPLIER", "DISTRIBUTOR", "RETAILER")
-    .required(),
+  requestedRole: Joi.string().valid("SUPPLIER", "DISTRIBUTOR").required(),
   businessName: Joi.string().trim().min(2).max(100).required(),
   businessAddress: Joi.string().trim().min(5).max(200).required(),
   contactNumber: Joi.string()

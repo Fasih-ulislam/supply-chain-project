@@ -1,17 +1,39 @@
-import express from "express";
+import { Router } from "express";
+import {
+  authenticateUser,
+  authorizeRoles,
+} from "../middlewares/validate.user.middleware.js";
 import * as userController from "../controllers/user.controller.js";
-import { authorizeRoles } from "../middlewares/validate.user.middleware.js";
 
-const router = express.Router();
+const router = Router();
 
-router.use(
-  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER")
+// All routes require authentication
+router.use(authenticateUser);
+
+// =====================================================
+// USER ROUTES (self-management)
+// =====================================================
+router.get(
+  "/",
+  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "CUSTOMER"),
+  userController.getUserByEmail
 );
-router.get("/", userController.getUserByEmail);
-router.put("/", userController.updateUser);
-router.delete("/", userController.deleteUser);
 
-router.use(authorizeRoles("ADMIN"));
-router.get("/all", userController.getAllUsers);
+router.put(
+  "/",
+  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "CUSTOMER"),
+  userController.updateUser
+);
+
+router.delete(
+  "/",
+  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "CUSTOMER"),
+  userController.deleteUser
+);
+
+// =====================================================
+// ADMIN ROUTES
+// =====================================================
+router.get("/all", authorizeRoles("ADMIN"), userController.getAllUsers);
 
 export default router;

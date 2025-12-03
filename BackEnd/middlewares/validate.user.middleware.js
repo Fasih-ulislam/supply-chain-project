@@ -2,7 +2,8 @@ import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 dotenv.config();
 
-export const validateUserMiddleware = async (req, res, next) => {
+// Authentication middleware - validates JWT token
+export const authenticateUser = async (req, res, next) => {
   const token = req.cookies.token;
   if (!token) {
     return res.status(401).json({ error: "Unauthorized: Missing token" });
@@ -22,37 +23,21 @@ export const validateUserMiddleware = async (req, res, next) => {
   }
 };
 
-// Authorize based on activeRole (single role at a time)
+// Alias for backwards compatibility
+export const validateUserMiddleware = authenticateUser;
+
+// Authorize based on single role (user.role)
 export function authorizeRoles(...allowedRoles) {
   return (req, res, next) => {
     const user = req.user;
 
-    // Check if user's activeRole is in the allowed roles
-    if (!user.activeRole || !allowedRoles.includes(user.activeRole)) {
+    // Check if user's role is in the allowed roles
+    if (!user.role || !allowedRoles.includes(user.role)) {
       return res.status(403).json({
         message: `Access denied. Required roles: ${allowedRoles.join(
           ", "
-        )}. Your active role: ${user.activeRole || "none"}`,
+        )}. Your role: ${user.role || "none"}`,
       });
-    }
-
-    next();
-  };
-}
-
-// Check if user has ANY of the roles (for reading available roles)
-export function hasAnyRole(...roles) {
-  return (req, res, next) => {
-    const user = req.user;
-
-    const hasAccess =
-      Array.isArray(user.userRoles) &&
-      user.userRoles.some(({ role }) => roles.includes(role));
-
-    if (!hasAccess) {
-      return res
-        .status(403)
-        .json({ message: "Access denied: insufficient permissions" });
     }
 
     next();

@@ -1,30 +1,39 @@
 import prisma from "../config/database.js";
 import ResponseError from "../utils/customError.js";
 
-// 🟩 Create an order (Buyer places order from a store)
-export async function createOrder(buyerId, data) {
-  const { productId, inventoryId, sellerId, quantity, deliveryAddress } = data;
+// =====================================================
+// CUSTOMER ACTIONS
+// =====================================================
+
+// 🟩 Create order (Customer places order from supplier's inventory)
+export async function createOrder(customerId, data) {
+  const { supplierId, productId, quantity, deliveryAddress } = data;
 
   return await prisma.$transaction(async (tx) => {
-    // Verify inventory exists and has enough stock
-    const inventory = await tx.inventory.findUnique({
-      where: { id: inventoryId },
-      include: { product: true },
+    // Get supplier profile with warehouse and inventory
+    const supplier = await tx.supplierProfile.findUnique({
+      where: { id: supplierId },
+      include: {
+        warehouse: {
+          include: {
+            inventories: {
+              where: { productId },
+              include: { product: true },
+            },
+          },
+        },
+      },
     });
 
-    if (!inventory) throw new ResponseError("Inventory not found", 404);
+    if (!supplier) throw new ResponseError("Supplier not found", 404);
+    if (!supplier.warehouse)
+      throw new ResponseError("Supplier has no warehouse", 404);
 
-    // Verify the inventory belongs to the seller
-    if (inventory.userId !== sellerId) {
-      throw new ResponseError("Invalid seller for this inventory", 400);
-    }
+    const inventory = supplier.warehouse.inventories[0];
+    if (!inventory)
+      throw new ResponseError("Product not available from this supplier", 404);
 
-    // Verify product matches
-    if (inventory.productId !== productId) {
-      throw new ResponseError("Product does not match inventory", 400);
-    }
-
-    // Check stock availability
+    // Check stock
     if (inventory.quantity < quantity) {
       throw new ResponseError(
         `Insufficient stock. Available: ${inventory.quantity}`,
@@ -32,8 +41,11 @@ export async function createOrder(buyerId, data) {
       );
     }
 
-    // Prevent self-ordering
-    if (buyerId === sellerId) {
+    // Prevent ordering from self
+    const supplierUser = await tx.user.findFirst({
+      where: { supplierProfile: { id: supplierId } },
+    });
+    if (supplierUser && supplierUser.id === customerId) {
       throw new ResponseError("Cannot order from yourself", 400);
     }
 
@@ -42,29 +54,29 @@ export async function createOrder(buyerId, data) {
     // Create the order
     const order = await tx.order.create({
       data: {
+        customerId,
+        supplierId,
+        productId,
         quantity,
         totalAmount,
-        productId,
-        inventoryId,
-        buyerId,
-        sellerId,
         deliveryAddress,
         status: "PENDING",
       },
       include: {
         product: true,
-        buyer: { select: { id: true, name: true, email: true } },
-        seller: { select: { id: true, name: true, email: true } },
-        inventory: true,
+        supplier: {
+          include: { user: { select: { id: true, name: true, email: true } } },
+        },
+        customer: { select: { id: true, name: true, email: true } },
       },
     });
 
-    // Add initial tracking event (buyer -> seller)
+    // Add tracking event
     await tx.trackingEvent.create({
       data: {
         orderId: order.id,
-        fromUserId: buyerId,
-        toUserId: sellerId,
+        fromUserId: customerId,
+        toUserId: supplierUser?.id,
         status: "PENDING",
         description: `Order placed for ${quantity} x ${inventory.product.name}`,
       },
@@ -74,92 +86,109 @@ export async function createOrder(buyerId, data) {
   });
 }
 
-// 🟦 Seller views orders they received
-export async function getSellerOrders(sellerId) {
+// 🟦 Get my orders (as customer)
+export async function getMyOrders(customerId) {
   return prisma.order.findMany({
-    where: { sellerId },
+    where: { customerId },
     include: {
       product: true,
-      buyer: { select: { id: true, name: true, email: true } },
-      inventory: true,
-      transporter: true,
-      trackingEvents: {
-        orderBy: { timestamp: "desc" },
-        take: 1,
+      supplier: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      legs: {
+        include: {
+          transporter: true,
+          toDistributor: {
+            include: { user: { select: { name: true } } },
+          },
+        },
+        orderBy: { legNumber: "asc" },
       },
     },
     orderBy: { orderDate: "desc" },
   });
 }
 
-// 🟦 Buyer views their orders
-export async function getBuyerOrders(buyerId) {
-  return prisma.order.findMany({
-    where: { buyerId },
-    include: {
-      product: true,
-      seller: { select: { id: true, name: true, email: true } },
-      inventory: true,
-      transporter: true,
-      trackingEvents: {
-        orderBy: { timestamp: "desc" },
-        take: 1,
-      },
-    },
-    orderBy: { orderDate: "desc" },
-  });
-}
-
-// 🟧 Buyer cancels their order
-export async function cancelOrder(orderId, buyerId) {
+// 🟧 Cancel order (Customer cancels before first shipment)
+export async function cancelOrder(orderId, customerId) {
   return await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
-      include: { inventory: true, product: true },
+      include: {
+        legs: true,
+        supplier: { include: { warehouse: true } },
+      },
     });
 
     if (!order) throw new ResponseError("Order not found", 404);
+    if (order.customerId !== customerId) {
+      throw new ResponseError("You can only cancel your own orders", 403);
+    }
 
-    if (order.buyerId !== buyerId) {
+    // Check if any leg is in transit or beyond
+    const hasShipped = order.legs.some((leg) =>
+      ["IN_TRANSIT", "DELIVERED"].includes(leg.status)
+    );
+
+    if (hasShipped) {
       throw new ResponseError(
-        "Unauthorized: You can only cancel your own orders",
-        403
+        "Cannot cancel: Order is already in transit",
+        400
       );
     }
 
-    // Can cancel at any point except DELIVERED or already CANCELLED/RETURNED
-    if (["DELIVERED", "CANCELLED", "RETURNED"].includes(order.status)) {
+    if (order.status === "CANCELLED" || order.status === "DELIVERED") {
       throw new ResponseError(
         `Cannot cancel order with status: ${order.status}`,
         400
       );
     }
 
-    // If order was APPROVED or beyond, restore the stock
-    if (["APPROVED", "PROCESSING", "IN_TRANSIT"].includes(order.status)) {
-      await tx.inventory.update({
-        where: { id: order.inventoryId },
-        data: {
-          quantity: { increment: order.quantity },
+    // If order was approved, restore stock
+    if (order.status === "APPROVED" || order.status === "IN_PROGRESS") {
+      const inventory = await tx.inventory.findFirst({
+        where: {
+          warehouseId: order.supplier.warehouse?.id,
+          productId: order.productId,
         },
       });
+
+      if (inventory) {
+        await tx.inventory.update({
+          where: { id: inventory.id },
+          data: { quantity: { increment: order.quantity } },
+        });
+      }
     }
 
-    // Update order status
+    // Cancel all pending legs
+    await tx.orderLeg.updateMany({
+      where: {
+        orderId,
+        status: { in: ["PENDING", "ACCEPTED"] },
+      },
+      data: { status: "REJECTED" },
+    });
+
+    // Update order
     const updatedOrder = await tx.order.update({
       where: { id: orderId },
       data: { status: "CANCELLED" },
-      include: { product: true, seller: true },
+      include: { product: true },
     });
 
-    // Add tracking event (buyer initiated cancellation)
+    // Add tracking event
+    const supplierUser = await tx.user.findFirst({
+      where: { supplierProfile: { id: order.supplierId } },
+    });
+
     await tx.trackingEvent.create({
       data: {
         orderId,
-        fromUserId: buyerId,
-        toUserId: order.sellerId,
+        fromUserId: customerId,
+        toUserId: supplierUser?.id,
         status: "CANCELLED",
-        description: "Order cancelled by buyer",
+        description: "Order cancelled by customer",
       },
     });
 
@@ -167,169 +196,216 @@ export async function cancelOrder(orderId, buyerId) {
   });
 }
 
-// 🟧 Seller approves or rejects order
-export async function processOrderBySeller(orderId, sellerId, action) {
+// 🟧 Confirm delivery (Customer confirms final delivery)
+export async function confirmDelivery(orderId, customerId) {
   return await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: orderId },
-      include: { inventory: true, product: true },
+      include: {
+        legs: { orderBy: { legNumber: "desc" }, take: 1 },
+      },
     });
 
     if (!order) throw new ResponseError("Order not found", 404);
-
-    if (order.sellerId !== sellerId) {
-      throw new ResponseError("Unauthorized: You are not the seller", 403);
+    if (order.customerId !== customerId) {
+      throw new ResponseError("You can only confirm your own orders", 403);
     }
 
-    if (order.status !== "PENDING") {
+    const lastLeg = order.legs[0];
+    if (
+      !lastLeg ||
+      lastLeg.toType !== "CUSTOMER" ||
+      lastLeg.status !== "IN_TRANSIT"
+    ) {
       throw new ResponseError(
-        `Cannot process order with status: ${order.status}`,
+        "Order is not ready for delivery confirmation",
         400
       );
     }
 
-    if (action === "APPROVE") {
-      // Check stock availability again at approval time
-      if (order.inventory.quantity < order.quantity) {
-        throw new ResponseError(
-          `Insufficient stock. Available: ${order.inventory.quantity}, Required: ${order.quantity}`,
-          400
-        );
-      }
+    // Mark last leg as delivered
+    await tx.orderLeg.update({
+      where: { id: lastLeg.id },
+      data: { status: "DELIVERED" },
+    });
 
-      // Deduct from inventory
-      await tx.inventory.update({
-        where: { id: order.inventoryId },
-        data: {
-          quantity: { decrement: order.quantity },
-        },
-      });
+    // Mark order as delivered
+    const updatedOrder = await tx.order.update({
+      where: { id: orderId },
+      data: { status: "DELIVERED" },
+      include: { product: true },
+    });
 
-      // Update order status
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: "APPROVED" },
-        include: { product: true, buyer: true },
-      });
+    // Add tracking event
+    await tx.trackingEvent.create({
+      data: {
+        orderId,
+        legId: lastLeg.id,
+        fromUserId: customerId,
+        status: "DELIVERED",
+        description: "Order delivered and confirmed by customer",
+      },
+    });
 
-      // Add tracking event (seller -> buyer)
-      await tx.trackingEvent.create({
-        data: {
-          orderId,
-          fromUserId: sellerId,
-          toUserId: order.buyerId,
-          status: "APPROVED",
-          description: "Order approved by seller. Stock reserved.",
-        },
-      });
-
-      return updatedOrder;
-    } else if (action === "REJECT") {
-      // Update order status to cancelled
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: "CANCELLED" },
-        include: { product: true, buyer: true },
-      });
-
-      // Add tracking event (seller rejected)
-      await tx.trackingEvent.create({
-        data: {
-          orderId,
-          fromUserId: sellerId,
-          toUserId: order.buyerId,
-          status: "CANCELLED",
-          description: "Order rejected by seller",
-        },
-      });
-
-      return updatedOrder;
-    }
-
-    throw new ResponseError("Invalid action. Use APPROVE or REJECT", 400);
+    return updatedOrder;
   });
 }
 
-// 🟧 Seller updates order status (PROCESSING, IN_TRANSIT)
-export async function updateOrderStatusBySeller(
-  orderId,
-  sellerId,
-  status,
-  data = {}
-) {
+// =====================================================
+// SUPPLIER ACTIONS
+// =====================================================
+
+// 🟧 Approve order and create first leg (Supplier approves and assigns distributor)
+export async function approveOrder(orderId, supplierId, data) {
+  const { distributorId, transporterId } = data;
+
   return await prisma.$transaction(async (tx) => {
+    // Get supplier profile
+    const supplierProfile = await tx.supplierProfile.findUnique({
+      where: { id: supplierId },
+      include: { warehouse: true, user: true },
+    });
+
+    if (!supplierProfile)
+      throw new ResponseError("Supplier profile not found", 404);
+
     const order = await tx.order.findUnique({
       where: { id: orderId },
       include: { product: true },
     });
 
     if (!order) throw new ResponseError("Order not found", 404);
-
-    if (order.sellerId !== sellerId) {
-      throw new ResponseError("Unauthorized: You are not the seller", 403);
+    if (order.supplierId !== supplierId) {
+      throw new ResponseError("This order is not for you", 403);
     }
-
-    // Define valid status transitions for seller
-    const validTransitions = {
-      APPROVED: ["PROCESSING", "CANCELLED"],
-      PROCESSING: ["IN_TRANSIT", "CANCELLED"],
-      CANCELLED: ["RETURNED"], // Seller can mark as returned after cancellation
-    };
-
-    if (!validTransitions[order.status]?.includes(status)) {
+    if (order.status !== "PENDING") {
       throw new ResponseError(
-        `Invalid status transition from ${order.status} to ${status}`,
+        `Cannot approve order with status: ${order.status}`,
         400
       );
     }
 
-    const updateData = { status };
+    // Verify distributor exists
+    const distributor = await tx.distributorProfile.findUnique({
+      where: { id: distributorId },
+      include: { user: true },
+    });
+    if (!distributor) throw new ResponseError("Distributor not found", 404);
 
-    // If transitioning to IN_TRANSIT, require transporterId
-    if (status === "IN_TRANSIT") {
-      if (!data.transporterId) {
-        throw new ResponseError(
-          "Transporter ID is required for IN_TRANSIT status",
-          400
-        );
-      }
-
-      // Verify transporter exists
-      const transporter = await tx.transporter.findUnique({
-        where: { id: data.transporterId },
-      });
-
-      if (!transporter) {
-        throw new ResponseError("Transporter not found", 404);
-      }
-
-      updateData.transporterId = data.transporterId;
+    // Verify transporter belongs to supplier
+    const transporter = await tx.transporter.findUnique({
+      where: { id: transporterId },
+    });
+    if (!transporter) throw new ResponseError("Transporter not found", 404);
+    if (transporter.supplierId !== supplierId) {
+      throw new ResponseError("This transporter does not belong to you", 403);
     }
 
-    // If marking as RETURNED, restore stock
-    if (status === "RETURNED") {
-      await tx.inventory.update({
-        where: { id: order.inventoryId },
-        data: {
-          quantity: { increment: order.quantity },
-        },
-      });
+    // Check and deduct stock
+    const inventory = await tx.inventory.findFirst({
+      where: {
+        warehouseId: supplierProfile.warehouse?.id,
+        productId: order.productId,
+      },
+    });
+
+    if (!inventory || inventory.quantity < order.quantity) {
+      throw new ResponseError(
+        `Insufficient stock. Available: ${inventory?.quantity || 0}`,
+        400
+      );
+    }
+
+    await tx.inventory.update({
+      where: { id: inventory.id },
+      data: { quantity: { decrement: order.quantity } },
+    });
+
+    // Update order status
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "APPROVED" },
+    });
+
+    // Create first leg: Supplier → Distributor
+    const leg = await tx.orderLeg.create({
+      data: {
+        orderId,
+        legNumber: 1,
+        fromType: "SUPPLIER",
+        fromSupplierId: supplierId,
+        toType: "DISTRIBUTOR",
+        toDistributorId: distributorId,
+        transporterId,
+        status: "PENDING",
+      },
+      include: {
+        transporter: true,
+        toDistributor: { include: { user: { select: { name: true } } } },
+      },
+    });
+
+    // Add tracking event
+    await tx.trackingEvent.create({
+      data: {
+        orderId,
+        legId: leg.id,
+        fromUserId: supplierProfile.user.id,
+        toUserId: distributor.user.id,
+        status: "APPROVED",
+        description: `Order approved. Awaiting distributor ${distributor.businessName} acceptance.`,
+      },
+    });
+
+    return {
+      order: await tx.order.findUnique({
+        where: { id: orderId },
+        include: { product: true, legs: true },
+      }),
+      leg,
+    };
+  });
+}
+
+// 🟧 Reject order (Supplier rejects)
+export async function rejectOrder(orderId, supplierId, reason) {
+  return await prisma.$transaction(async (tx) => {
+    const supplierProfile = await tx.supplierProfile.findUnique({
+      where: { id: supplierId },
+      include: { user: true },
+    });
+
+    if (!supplierProfile)
+      throw new ResponseError("Supplier profile not found", 404);
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) throw new ResponseError("Order not found", 404);
+    if (order.supplierId !== supplierId) {
+      throw new ResponseError("This order is not for you", 403);
+    }
+    if (order.status !== "PENDING") {
+      throw new ResponseError(
+        `Cannot reject order with status: ${order.status}`,
+        400
+      );
     }
 
     const updatedOrder = await tx.order.update({
       where: { id: orderId },
-      data: updateData,
-      include: { product: true, buyer: true, transporter: true },
+      data: { status: "CANCELLED" },
+      include: { product: true, customer: true },
     });
 
-    // Add tracking event (seller -> buyer)
     await tx.trackingEvent.create({
       data: {
         orderId,
-        fromUserId: sellerId,
-        toUserId: order.buyerId,
-        status,
-        description: data.description || `Order status updated to ${status}`,
+        fromUserId: supplierProfile.user.id,
+        toUserId: order.customerId,
+        status: "CANCELLED",
+        description: reason || "Order rejected by supplier",
       },
     });
 
@@ -337,98 +413,251 @@ export async function updateOrderStatusBySeller(
   });
 }
 
-// 🟧 Buyer confirms delivery or rejects
-export async function confirmDelivery(orderId, buyerId, action) {
+// 🟧 Ship order (Supplier marks leg as in-transit after distributor accepts)
+export async function shipOrder(orderId, supplierId, legId) {
   return await prisma.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: { id: orderId },
-      include: { product: true, inventory: true },
+    const supplierProfile = await tx.supplierProfile.findUnique({
+      where: { id: supplierId },
+      include: { user: true },
     });
 
-    if (!order) throw new ResponseError("Order not found", 404);
+    if (!supplierProfile)
+      throw new ResponseError("Supplier profile not found", 404);
 
-    if (order.buyerId !== buyerId) {
-      throw new ResponseError("Unauthorized: You are not the buyer", 403);
+    const leg = await tx.orderLeg.findUnique({
+      where: { id: legId },
+      include: {
+        order: true,
+        toDistributor: { include: { user: true } },
+      },
+    });
+
+    if (!leg) throw new ResponseError("Order leg not found", 404);
+    if (leg.order.supplierId !== supplierId) {
+      throw new ResponseError("This order is not yours", 403);
     }
-
-    if (order.status !== "IN_TRANSIT") {
+    if (leg.fromType !== "SUPPLIER" || leg.fromSupplierId !== supplierId) {
+      throw new ResponseError("You can only ship legs you created", 403);
+    }
+    if (leg.status !== "ACCEPTED") {
       throw new ResponseError(
-        "Order must be IN_TRANSIT to confirm delivery",
+        "Distributor has not accepted this delivery yet",
         400
       );
     }
 
-    if (action === "CONFIRM") {
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: "DELIVERED" },
-        include: { product: true, seller: true },
-      });
+    // Update leg status
+    const updatedLeg = await tx.orderLeg.update({
+      where: { id: legId },
+      data: { status: "IN_TRANSIT" },
+      include: { transporter: true },
+    });
 
-      // Tracking: buyer confirms receipt (buyer -> seller as acknowledgment)
-      await tx.trackingEvent.create({
-        data: {
-          orderId,
-          fromUserId: buyerId,
-          toUserId: order.sellerId,
-          status: "DELIVERED",
-          description: "Product received and confirmed by buyer",
-        },
-      });
+    // Update order status to IN_PROGRESS
+    await tx.order.update({
+      where: { id: leg.orderId },
+      data: { status: "IN_PROGRESS" },
+    });
 
-      return updatedOrder;
-    } else if (action === "REJECT") {
-      // Buyer rejects delivery - order goes to CANCELLED
-      // Stock will be restored when seller marks as RETURNED
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
-        data: { status: "CANCELLED" },
-        include: { product: true, seller: true },
-      });
+    // Add tracking event
+    await tx.trackingEvent.create({
+      data: {
+        orderId: leg.orderId,
+        legId,
+        fromUserId: supplierProfile.user.id,
+        toUserId: leg.toDistributor?.user.id,
+        status: "IN_TRANSIT",
+        description: `Shipped to distributor ${leg.toDistributor?.businessName}`,
+      },
+    });
 
-      // Tracking: buyer rejects delivery
-      await tx.trackingEvent.create({
-        data: {
-          orderId,
-          fromUserId: buyerId,
-          toUserId: order.sellerId,
-          status: "CANCELLED",
-          description: "Product rejected by buyer. Awaiting return.",
-        },
-      });
-
-      return updatedOrder;
-    }
-
-    throw new ResponseError("Invalid action. Use CONFIRM or REJECT", 400);
+    return updatedLeg;
   });
 }
 
-// 🟦 Get order by ID
+// 🟧 Reassign order (Supplier picks new distributor after rejection)
+export async function reassignOrder(orderId, supplierId, data) {
+  const { distributorId, transporterId } = data;
+
+  return await prisma.$transaction(async (tx) => {
+    const supplierProfile = await tx.supplierProfile.findUnique({
+      where: { id: supplierId },
+      include: { user: true },
+    });
+
+    if (!supplierProfile)
+      throw new ResponseError("Supplier profile not found", 404);
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: {
+        product: true,
+        legs: { orderBy: { legNumber: "desc" } },
+      },
+    });
+
+    if (!order) throw new ResponseError("Order not found", 404);
+    if (order.supplierId !== supplierId) {
+      throw new ResponseError("This order is not for you", 403);
+    }
+
+    // Can only reassign if status is PENDING_REASSIGN or APPROVED (distributor rejected)
+    if (!["PENDING_REASSIGN", "APPROVED"].includes(order.status)) {
+      throw new ResponseError(
+        `Cannot reassign order with status: ${order.status}`,
+        400
+      );
+    }
+
+    // Check that the last leg was rejected
+    const lastLeg = order.legs[0];
+    if (lastLeg && lastLeg.status !== "REJECTED") {
+      throw new ResponseError(
+        "Can only reassign after distributor rejects",
+        400
+      );
+    }
+
+    // Check it's not the same distributor
+    if (lastLeg && lastLeg.toDistributorId === distributorId) {
+      throw new ResponseError(
+        "Choose a different distributor - this one already rejected",
+        400
+      );
+    }
+
+    // Verify new distributor exists
+    const distributor = await tx.distributorProfile.findUnique({
+      where: { id: distributorId },
+      include: { user: true },
+    });
+    if (!distributor) throw new ResponseError("Distributor not found", 404);
+
+    // Verify transporter belongs to supplier
+    const transporter = await tx.transporter.findUnique({
+      where: { id: transporterId },
+    });
+    if (!transporter) throw new ResponseError("Transporter not found", 404);
+    if (transporter.supplierId !== supplierId) {
+      throw new ResponseError("This transporter does not belong to you", 403);
+    }
+
+    // Create new leg with next leg number
+    const newLegNumber = lastLeg ? lastLeg.legNumber + 1 : 1;
+
+    const newLeg = await tx.orderLeg.create({
+      data: {
+        orderId,
+        legNumber: newLegNumber,
+        fromType: "SUPPLIER",
+        fromSupplierId: supplierId,
+        toType: "DISTRIBUTOR",
+        toDistributorId: distributorId,
+        transporterId,
+        status: "PENDING",
+      },
+      include: {
+        transporter: true,
+        toDistributor: { include: { user: { select: { name: true } } } },
+      },
+    });
+
+    // Update order status back to APPROVED
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "APPROVED" },
+    });
+
+    // Add tracking event
+    await tx.trackingEvent.create({
+      data: {
+        orderId,
+        legId: newLeg.id,
+        fromUserId: supplierProfile.user.id,
+        toUserId: distributor.user.id,
+        status: "REASSIGNED",
+        description: `Order reassigned to distributor ${distributor.businessName} after previous rejection.`,
+      },
+    });
+
+    return {
+      order: await tx.order.findUnique({
+        where: { id: orderId },
+        include: { product: true, legs: { orderBy: { legNumber: "asc" } } },
+      }),
+      leg: newLeg,
+    };
+  });
+}
+
+// =====================================================
+// PUBLIC / BROWSE
+// =====================================================
+
+// 🟦 Get all available products (from all suppliers)
+export async function getAvailableProducts() {
+  const inventories = await prisma.inventory.findMany({
+    where: { quantity: { gt: 0 } },
+    include: {
+      product: true,
+      warehouse: {
+        include: {
+          supplier: {
+            include: {
+              user: { select: { id: true, name: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  return inventories.map((inv) => ({
+    productId: inv.product.id,
+    name: inv.product.name,
+    category: inv.product.category,
+    description: inv.product.description,
+    price: inv.product.price,
+    availableQuantity: inv.quantity,
+    supplierId: inv.warehouse.supplier.id,
+    supplierName: inv.warehouse.supplier.businessName,
+    supplierUserId: inv.warehouse.supplier.user.id,
+  }));
+}
+
+// 🟦 Get order by ID (for customer or supplier)
 export async function getOrderById(orderId, userId) {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
       product: true,
-      buyer: { select: { id: true, name: true, email: true } },
-      seller: { select: { id: true, name: true, email: true } },
-      inventory: true,
-      transporter: true,
+      customer: { select: { id: true, name: true, email: true } },
+      supplier: {
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+      legs: {
+        include: {
+          transporter: true,
+          fromSupplier: { include: { user: { select: { name: true } } } },
+          fromDistributor: { include: { user: { select: { name: true } } } },
+          toDistributor: { include: { user: { select: { name: true } } } },
+        },
+        orderBy: { legNumber: "asc" },
+      },
       trackingEvents: {
         orderBy: { timestamp: "asc" },
-        include: {
-          fromUser: { select: { id: true, name: true } },
-          toUser: { select: { id: true, name: true } },
-        },
       },
     },
   });
 
   if (!order) throw new ResponseError("Order not found", 404);
 
-  // Only buyer or seller can view order details
-  if (order.buyerId !== userId && order.sellerId !== userId) {
-    throw new ResponseError("Unauthorized: You cannot view this order", 403);
+  // Check access
+  const isCustomer = order.customerId === userId;
+  const isSupplier = order.supplier.user.id === userId;
+
+  if (!isCustomer && !isSupplier) {
+    throw new ResponseError("You don't have access to this order", 403);
   }
 
   return order;

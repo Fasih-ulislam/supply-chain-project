@@ -1,38 +1,68 @@
-import express from "express";
+import { Router } from "express";
+import {
+  authenticateUser,
+  authorizeRoles,
+} from "../middlewares/validate.user.middleware.js";
 import * as roleRequestController from "../controllers/role.request.controller.js";
-import { authorizeRoles } from "../middlewares/validate.user.middleware.js";
 
-const router = express.Router();
+const router = Router();
 
-// Allow all authenticated user roles to create + view their requests
-router.use(
-  authorizeRoles("ADMIN", "SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER")
+// All routes require authentication
+router.use(authenticateUser);
+
+// =====================================================
+// CUSTOMER ROUTES (customers can request SUPPLIER/DISTRIBUTOR)
+// =====================================================
+// Create a new role request
+router.post(
+  "/",
+  authorizeRoles("CUSTOMER"),
+  roleRequestController.createRoleRequest
 );
 
-// 🟩 Create a new request
-router.post("/", roleRequestController.createRoleRequest);
+// Get my role requests
+router.get(
+  "/me",
+  authorizeRoles("CUSTOMER", "SUPPLIER", "DISTRIBUTOR"),
+  roleRequestController.getMyRoleRequests
+);
 
-// 🟨 Get my role requests
-router.get("/me", roleRequestController.getMyRoleRequests);
+// =====================================================
+// ADMIN ROUTES
+// =====================================================
+// Get all role requests
+router.get(
+  "/all",
+  authorizeRoles("ADMIN"),
+  roleRequestController.getAllRoleRequests
+);
 
-// ---------------------------
-// ADMIN-ONLY ROUTES
-// ---------------------------
-router.use(authorizeRoles("ADMIN"));
+// Get pending role requests
+router.get(
+  "/pending",
+  authorizeRoles("ADMIN"),
+  roleRequestController.getPendingRoleRequests
+);
 
-// 🟦 Get all role requests
-router.get("/all", roleRequestController.getAllRoleRequests);
+// Get a request by ID
+router.get(
+  "/:id",
+  authorizeRoles("ADMIN"),
+  roleRequestController.getRoleRequestById
+);
 
-// 🟦 Get all role requests
-router.get("/pending", roleRequestController.getPendingRoleRequests);
+// Approve / Reject a request
+router.patch(
+  "/:id/status",
+  authorizeRoles("ADMIN"),
+  roleRequestController.updateRoleRequestStatus
+);
 
-// 🟧 Get a request by ID
-router.get("/:id", roleRequestController.getRoleRequestById);
-
-// 🟥 Approve / Reject a request
-router.patch("/:id/status", roleRequestController.updateRoleRequestStatus);
-
-// ⬛ Delete a request
-router.delete("/:id", roleRequestController.deleteRoleRequest);
+// Delete a request
+router.delete(
+  "/:id",
+  authorizeRoles("ADMIN"),
+  roleRequestController.deleteRoleRequest
+);
 
 export default router;

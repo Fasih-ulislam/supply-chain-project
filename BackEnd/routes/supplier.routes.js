@@ -1,21 +1,59 @@
-import express from "express";
+import { Router } from "express";
+import {
+  authenticateUser,
+  authorizeRoles,
+} from "../middlewares/validate.user.middleware.js";
 import * as supplierController from "../controllers/supplier.controller.js";
-import { authorizeRoles } from "../middlewares/validate.user.middleware.js";
 
-const router = express.Router();
+const router = Router();
 
-// i see my data
-router.use(authorizeRoles("SUPPLIER"));
+// All routes require authentication + SUPPLIER role
+router.use(authenticateUser, authorizeRoles("SUPPLIER"));
 
-//router.get("/:id", supplierController.getSupplierById);
-router.get("/me", supplierController.getMySupplierData);
-router.put("/me", supplierController.updateMySupplierData);
+// =====================================================
+// PROFILE
+// =====================================================
+router.get("/profile", supplierController.getMyProfile);
+router.put("/profile", supplierController.updateMyProfile);
 
-// Admin-only actions
-router.use(authorizeRoles("ADMIN"));
-router.get("/all", supplierController.getAllSuppliers);
-// router.post("/", supplierController.createSupplier);
-// router.put("/:id", supplierController.updateSupplier);
-// router.delete("/:id", supplierController.deleteSupplier);
+// =====================================================
+// WAREHOUSE
+// =====================================================
+router.put("/warehouse", supplierController.updateWarehouse);
+
+// =====================================================
+// PRODUCTS
+// =====================================================
+router.get("/products", supplierController.getMyProducts);
+router.post("/products", supplierController.createProduct);
+router.put("/products/:id", supplierController.updateProduct);
+router.delete("/products/:id", supplierController.deleteProduct);
+
+// =====================================================
+// INVENTORY
+// =====================================================
+router.get("/inventory", supplierController.getMyInventory);
+router.post("/inventory", supplierController.addToInventory);
+router.put("/inventory/:id", supplierController.updateInventory);
+router.delete("/inventory/:id", supplierController.removeFromInventory);
+
+// =====================================================
+// TRANSPORTERS
+// =====================================================
+router.get("/transporters", supplierController.getMyTransporters);
+router.post("/transporters", supplierController.createTransporter);
+router.put("/transporters/:id", supplierController.updateTransporter);
+router.delete("/transporters/:id", supplierController.deleteTransporter);
+
+// =====================================================
+// ORDERS (supplier viewing their incoming orders)
+// =====================================================
+router.get("/orders", supplierController.getMyOrders);
+
+// =====================================================
+// BROWSE
+// =====================================================
+router.get("/distributors", supplierController.getAllDistributors);
+router.get("/suppliers", supplierController.getAllSuppliers);
 
 export default router;

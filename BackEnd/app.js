@@ -1,18 +1,14 @@
 import express from "express";
+import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import roleRequestRoutes from "./routes/role.request.routes.js";
 import supplierRoutes from "./routes/supplier.routes.js";
-import authRoutes from "./routes/auth.routes.js";
-import productRoutes from "./routes/product.routes.js";
+import distributorRoutes from "./routes/distributor.routes.js";
 import orderRoutes from "./routes/order.routes.js";
-import trackingEventRoutes from "./routes/tracking.event.routes.js";
-import inventoryRoutes from "./routes/inventory.routes.js";
-import transporterRoutes from "./routes/transporter.routes.js";
 import errorHandler from "./middlewares/globalErrorHandler.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { validateUserMiddleware } from "./middlewares/validate.user.middleware.js";
 
 //Main server instance
 const app = express();
@@ -53,34 +49,27 @@ app.use(cookieParser());
 
 /***************** ROUTING ****************/
 
-// -------> Open Routes <--------
-//health check
+// -------> Health Check <--------
 app.get("/health-check", (req, res) => {
   res.status(200).json("OK");
 });
-// Auth Routes
+
+// -------> Public Routes <--------
+// Auth Routes (register, login, logout, verify-otp)
 app.use("/api/auth", authRoutes);
-// Inventory/Stores (public browse, protected manage)
-app.use("/api/inventory", inventoryRoutes);
 
 // -------> Protected Routes <--------
-
-//Main line of defence (NEVER REMOVE !!!)
-app.use(validateUserMiddleware);
+// Each route file handles its own authentication via authenticateUser middleware
 // User Routes
-app.use("/api/protected/user", userRoutes);
-//Role Request Routes
-app.use("/api/protected/role-request", roleRequestRoutes);
-//Supplier Routes
-app.use("/api/protected/supplier", supplierRoutes);
-//Product Routes
-app.use("/api/protected/product", productRoutes);
-//Order Routes
-app.use("/api/protected/order", orderRoutes);
-//Tracking Event Routes
-app.use("/api/protected/tracking-event", trackingEventRoutes);
-//Transporter Routes
-app.use("/api/protected/transporter", transporterRoutes);
+app.use("/api/user", userRoutes);
+// Role Request Routes (customers request SUPPLIER/DISTRIBUTOR, admin approves)
+app.use("/api/role-request", roleRequestRoutes);
+// Supplier Routes (profile, products, inventory, transporters, orders)
+app.use("/api/supplier", supplierRoutes);
+// Distributor Routes (profile, transporters, order legs)
+app.use("/api/distributor", distributorRoutes);
+// Order Routes (customers create, suppliers approve, view)
+app.use("/api/order", orderRoutes);
 
 /***************** ERROR HANDLING ****************/
 // Global Error Handler

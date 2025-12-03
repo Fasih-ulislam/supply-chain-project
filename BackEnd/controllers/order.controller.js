@@ -1,44 +1,65 @@
 import * as orderService from "../services/order.service.js";
 import ResponseError from "../utils/customError.js";
-import {
-  createOrderSchema,
-  processOrderSchema,
-  updateOrderStatusSchema,
-  confirmDeliverySchema,
-} from "../utils/validation.js";
 
-// 🟩 Create Order (Buyer places order from a store)
+// =====================================================
+// PUBLIC / BROWSE
+// =====================================================
+
+// 🟦 Get all available products (from suppliers)
+export async function getAvailableProducts(req, res, next) {
+  try {
+    const products = await orderService.getAvailableProducts();
+    res.json(products);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// =====================================================
+// CUSTOMER ACTIONS
+// =====================================================
+
+// 🟩 Create order
 export async function createOrder(req, res, next) {
   try {
-    const { error } = createOrderSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
     const order = await orderService.createOrder(req.user.id, req.body);
-
-    res.status(201).json({
-      message: "Order placed successfully",
-      order,
-    });
+    res.status(201).json({ message: "Order placed", order });
   } catch (err) {
     next(err);
   }
 }
 
-// 🟦 Seller views orders they received
-export async function getSellerOrders(req, res, next) {
+// 🟦 Get my orders (as customer)
+export async function getMyOrders(req, res, next) {
   try {
-    const orders = await orderService.getSellerOrders(req.user.id);
+    const orders = await orderService.getMyOrders(req.user.id);
     res.json(orders);
   } catch (err) {
     next(err);
   }
 }
 
-// 🟦 Buyer views their orders
-export async function getBuyerOrders(req, res, next) {
+// 🟧 Cancel order
+export async function cancelOrder(req, res, next) {
   try {
-    const orders = await orderService.getBuyerOrders(req.user.id);
-    res.json(orders);
+    const orderId = parseInt(req.params.id);
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
+
+    const order = await orderService.cancelOrder(orderId, req.user.id);
+    res.json({ message: "Order cancelled", order });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// 🟧 Confirm delivery
+export async function confirmDelivery(req, res, next) {
+  try {
+    const orderId = parseInt(req.params.id);
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
+
+    const order = await orderService.confirmDelivery(orderId, req.user.id);
+    res.json({ message: "Delivery confirmed", order });
   } catch (err) {
     next(err);
   }
@@ -48,9 +69,7 @@ export async function getBuyerOrders(req, res, next) {
 export async function getOrderById(req, res, next) {
   try {
     const orderId = parseInt(req.params.id);
-    if (isNaN(orderId) || orderId <= 0) {
-      throw new ResponseError("Invalid order ID", 400);
-    }
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
 
     const order = await orderService.getOrderById(orderId, req.user.id);
     res.json(order);
@@ -59,104 +78,93 @@ export async function getOrderById(req, res, next) {
   }
 }
 
-// 🟧 Buyer cancels their order
-export async function cancelOrder(req, res, next) {
+// =====================================================
+// SUPPLIER ACTIONS
+// =====================================================
+
+// 🟧 Approve order (and assign distributor)
+export async function approveOrder(req, res, next) {
   try {
     const orderId = parseInt(req.params.id);
-    if (isNaN(orderId) || orderId <= 0) {
-      throw new ResponseError("Invalid order ID", 400);
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
+
+    const supplierProfileId = req.user.supplierProfileId;
+    if (!supplierProfileId) {
+      throw new ResponseError("Supplier profile not found", 404);
     }
 
-    const order = await orderService.cancelOrder(orderId, req.user.id);
-
-    res.json({
-      message: "Order cancelled successfully",
-      order,
-    });
+    const result = await orderService.approveOrder(
+      orderId,
+      supplierProfileId,
+      req.body
+    );
+    res.json({ message: "Order approved", ...result });
   } catch (err) {
     next(err);
   }
 }
 
-// 🟧 Seller approves or rejects order
-export async function processOrder(req, res, next) {
+// 🟧 Reject order
+export async function rejectOrder(req, res, next) {
   try {
     const orderId = parseInt(req.params.id);
-    if (isNaN(orderId) || orderId <= 0) {
-      throw new ResponseError("Invalid order ID", 400);
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
+
+    const supplierProfileId = req.user.supplierProfileId;
+    if (!supplierProfileId) {
+      throw new ResponseError("Supplier profile not found", 404);
     }
 
-    const { error } = processOrderSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
-    const { action } = req.body;
-    const order = await orderService.processOrderBySeller(
+    const { reason } = req.body;
+    const order = await orderService.rejectOrder(
       orderId,
-      req.user.id,
-      action
+      supplierProfileId,
+      reason
     );
-
-    res.json({
-      message: `Order ${action.toLowerCase()}d successfully`,
-      order,
-    });
+    res.json({ message: "Order rejected", order });
   } catch (err) {
     next(err);
   }
 }
 
-// 🟧 Seller updates order status
-export async function updateOrderStatus(req, res, next) {
+// 🟧 Ship order (mark leg as in-transit)
+export async function shipOrder(req, res, next) {
   try {
     const orderId = parseInt(req.params.id);
-    if (isNaN(orderId) || orderId <= 0) {
-      throw new ResponseError("Invalid order ID", 400);
+    const legId = parseInt(req.params.legId);
+    if (isNaN(orderId) || isNaN(legId)) {
+      throw new ResponseError("Invalid order or leg ID", 400);
     }
 
-    const { error } = updateOrderStatusSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
+    const supplierProfileId = req.user.supplierProfileId;
+    if (!supplierProfileId) {
+      throw new ResponseError("Supplier profile not found", 404);
+    }
 
-    const { status, transporterId, description } = req.body;
-
-    const order = await orderService.updateOrderStatusBySeller(
-      orderId,
-      req.user.id,
-      status,
-      { transporterId, description }
-    );
-
-    res.json({
-      message: "Order status updated",
-      order,
-    });
+    const leg = await orderService.shipOrder(orderId, supplierProfileId, legId);
+    res.json({ message: "Order shipped", leg });
   } catch (err) {
     next(err);
   }
 }
 
-// 🟧 Buyer confirms or rejects delivery
-export async function confirmDelivery(req, res, next) {
+// 🟧 Reassign order (pick new distributor after rejection)
+export async function reassignOrder(req, res, next) {
   try {
     const orderId = parseInt(req.params.id);
-    if (isNaN(orderId) || orderId <= 0) {
-      throw new ResponseError("Invalid order ID", 400);
+    if (isNaN(orderId)) throw new ResponseError("Invalid order ID", 400);
+
+    const supplierProfileId = req.user.supplierProfileId;
+    if (!supplierProfileId) {
+      throw new ResponseError("Supplier profile not found", 404);
     }
 
-    const { error } = confirmDeliverySchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
-    const { action } = req.body;
-    const order = await orderService.confirmDelivery(
+    const result = await orderService.reassignOrder(
       orderId,
-      req.user.id,
-      action
+      supplierProfileId,
+      req.body
     );
-
-    res.json({
-      message:
-        action === "CONFIRM" ? "Delivery confirmed" : "Delivery rejected",
-      order,
-    });
+    res.json({ message: "Order reassigned to new distributor", ...result });
   } catch (err) {
     next(err);
   }

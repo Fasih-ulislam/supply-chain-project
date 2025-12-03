@@ -1,63 +1,84 @@
-import express from "express";
+import { Router } from "express";
+import {
+  authenticateUser,
+  authorizeRoles,
+} from "../middlewares/validate.user.middleware.js";
 import * as orderController from "../controllers/order.controller.js";
-import { authorizeRoles } from "../middlewares/validate.user.middleware.js";
 
-const router = express.Router();
+const router = Router();
 
-// 🟩 Buyer creates order
+// All routes require authentication
+router.use(authenticateUser);
+
+// =====================================================
+// PUBLIC / BROWSE
+// =====================================================
+// Anyone authenticated can browse available products
+router.get("/products", orderController.getAvailableProducts);
+
+// =====================================================
+// CUSTOMER ROUTES
+// =====================================================
+// Create order (customer places an order from a supplier)
+router.post("/", authorizeRoles("CUSTOMER"), orderController.createOrder);
+
+// Get my orders (as customer)
+router.get(
+  "/my-orders",
+  authorizeRoles("CUSTOMER"),
+  orderController.getMyOrders
+);
+
+// Cancel order
 router.post(
-  "/",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER"),
-  orderController.createOrder
-);
-
-// 🟦 Seller views orders they received
-router.get(
-  "/seller",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER"),
-  orderController.getSellerOrders
-);
-
-// 🟦 Buyer views their orders
-router.get(
-  "/buyer",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER"),
-  orderController.getBuyerOrders
-);
-
-// 🟦 Get order by ID
-router.get(
-  "/:id",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER"),
-  orderController.getOrderById
-);
-
-// 🟧 Buyer cancels their order
-router.patch(
   "/:id/cancel",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER"),
+  authorizeRoles("CUSTOMER"),
   orderController.cancelOrder
 );
 
-// 🟧 Seller approves/rejects order (action: APPROVE or REJECT)
-router.patch(
-  "/:id/process",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER"),
-  orderController.processOrder
-);
-
-// 🟧 Seller updates order status (PROCESSING, IN_TRANSIT, RETURNED)
-router.patch(
-  "/:id/status",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER"),
-  orderController.updateOrderStatus
-);
-
-// 🟧 Buyer confirms/rejects delivery (action: CONFIRM or REJECT)
-router.patch(
-  "/:id/delivery",
-  authorizeRoles("SUPPLIER", "DISTRIBUTOR", "RETAILER", "CUSTOMER"),
+// Confirm delivery (final leg delivered)
+router.post(
+  "/:id/confirm-delivery",
+  authorizeRoles("CUSTOMER"),
   orderController.confirmDelivery
+);
+
+// Get order by ID (customer can view their own orders)
+router.get(
+  "/:id",
+  authorizeRoles("CUSTOMER", "SUPPLIER", "DISTRIBUTOR", "ADMIN"),
+  orderController.getOrderById
+);
+
+// =====================================================
+// SUPPLIER ROUTES (for order processing)
+// =====================================================
+// Approve order (assign distributor and transporter)
+router.post(
+  "/:id/approve",
+  authorizeRoles("SUPPLIER"),
+  orderController.approveOrder
+);
+
+// Reject order
+router.post(
+  "/:id/reject",
+  authorizeRoles("SUPPLIER"),
+  orderController.rejectOrder
+);
+
+// Reassign order (pick new distributor after rejection)
+router.post(
+  "/:id/reassign",
+  authorizeRoles("SUPPLIER"),
+  orderController.reassignOrder
+);
+
+// Ship order (mark leg as in-transit)
+router.post(
+  "/:id/legs/:legId/ship",
+  authorizeRoles("SUPPLIER"),
+  orderController.shipOrder
 );
 
 export default router;

@@ -4,7 +4,6 @@ import {
   pendingUserSchema,
   loginSchema,
   otpSchema,
-  switchRoleSchema,
 } from "../utils/validation.js";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
@@ -39,7 +38,7 @@ export async function loginUser(req, res, next) {
     const { error } = loginSchema.validate(req.body);
     if (error) throw new ResponseError(error.details[0].message, 400);
 
-    const { email, password, activeRole } = req.body;
+    const { email, password } = req.body;
 
     const normalizedEmail = email.toLowerCase().trim();
 
@@ -48,32 +47,15 @@ export async function loginUser(req, res, next) {
       password,
     });
 
-    // Validate activeRole if provided
-    let selectedRole = activeRole;
-    const userRoleNames = user.userRoles.map((r) => r.role);
-
-    if (activeRole) {
-      // Check if user has the requested role
-      if (!userRoleNames.includes(activeRole)) {
-        throw new ResponseError(
-          `You do not have the ${activeRole} role. Available roles: ${userRoleNames.join(
-            ", "
-          )}`,
-          403
-        );
-      }
-    } else {
-      // Default to first role if not specified
-      selectedRole = userRoleNames[0] || "CUSTOMER";
-    }
-
-    // Create JWT with activeRole
+    // Create JWT with single role
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
-        activeRole: selectedRole,
-        userRoles: user.userRoles,
+        role: user.role,
+        // Include profile IDs if they exist
+        supplierProfileId: user.supplierProfile?.id || null,
+        distributorProfileId: user.distributorProfile?.id || null,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
@@ -92,57 +74,10 @@ export async function loginUser(req, res, next) {
         id: user.id,
         email: user.email,
         name: user.name,
-        activeRole: selectedRole,
-        availableRoles: userRoleNames,
+        role: user.role,
+        hasSupplierProfile: !!user.supplierProfile,
+        hasDistributorProfile: !!user.distributorProfile,
       },
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
-// Switch active role (user must have the role)
-export async function switchRole(req, res, next) {
-  try {
-    const { error } = switchRoleSchema.validate(req.body);
-    if (error) throw new ResponseError(error.details[0].message, 400);
-
-    const { role } = req.body;
-    const user = req.user;
-
-    const userRoleNames = user.userRoles.map((r) => r.role);
-
-    if (!userRoleNames.includes(role)) {
-      throw new ResponseError(
-        `You do not have the ${role} role. Available roles: ${userRoleNames.join(
-          ", "
-        )}`,
-        403
-      );
-    }
-
-    // Create new JWT with updated activeRole
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        activeRole: role,
-        userRoles: user.userRoles,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None",
-      maxAge: 60 * 60 * 1000,
-    });
-
-    res.status(200).json({
-      message: `Switched to ${role} role`,
-      activeRole: role,
     });
   } catch (err) {
     next(err);
@@ -175,8 +110,9 @@ export async function getCurrentUser(req, res, next) {
     res.json({
       id: user.id,
       email: user.email,
-      activeRole: user.activeRole,
-      availableRoles: user.userRoles.map((r) => r.role),
+      role: user.role,
+      supplierProfileId: user.supplierProfileId,
+      distributorProfileId: user.distributorProfileId,
     });
   } catch (err) {
     next(err);
