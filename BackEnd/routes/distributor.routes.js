@@ -34,31 +34,31 @@ router.get("/orders/held", distributorController.getHeldOrders);
 // ORDER LEG ACTIONS
 // =====================================================
 // Accept an incoming delivery assignment
-router.post(
-  "/orders/:orderId/legs/:legId/accept",
-  distributorController.acceptDelivery
-);
+router.post("/legs/:legId/accept", distributorController.acceptDelivery);
 
 // Reject an incoming delivery assignment
-router.post(
-  "/orders/:orderId/legs/:legId/reject",
-  distributorController.rejectDelivery
-);
+router.post("/legs/:legId/reject", distributorController.rejectDelivery);
 
 // Confirm receipt of goods (leg delivered to me)
 router.post(
-  "/orders/:orderId/legs/:legId/confirm-receipt",
+  "/legs/:legId/confirm-receipt",
   distributorController.confirmReceipt
 );
+
+// Ship a leg (mark as in-transit)
+router.post("/legs/:legId/ship", distributorController.shipForward);
 
 // Forward to another distributor or to customer
 router.post("/orders/:orderId/forward", distributorController.forwardOrder);
 
-// Ship a leg (mark as in-transit)
-router.post(
-  "/orders/:orderId/legs/:legId/ship",
-  distributorController.shipForward
-);
+// =====================================================
+// LEG TRACKING
+// =====================================================
+// Get all legs I've sent out (outgoing)
+router.get("/legs/outgoing", distributorController.getOutgoingLegs);
+
+// Get specific leg details by ID
+router.get("/legs/:legId", distributorController.getLegById);
 
 // =====================================================
 // BROWSE

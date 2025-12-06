@@ -226,3 +226,30 @@ export async function getAllDistributorsAdmin(req, res, next) {
     next(err);
   }
 }
+
+// =====================================================
+// LEG TRACKING
+// =====================================================
+
+// 🟦 Get all legs I've sent out
+export async function getOutgoingLegs(req, res, next) {
+  try {
+    const legs = await distributorService.getOutgoingLegs(req.user.id);
+    res.json(legs);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// 🟦 Get specific leg by ID
+export async function getLegById(req, res, next) {
+  try {
+    const legId = parseInt(req.params.legId);
+    if (isNaN(legId)) throw new ResponseError("Invalid leg ID", 400);
+
+    const leg = await distributorService.getLegById(req.user.id, legId);
+    res.json(leg);
+  } catch (err) {
+    next(err);
+  }
+}

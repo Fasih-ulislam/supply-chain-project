@@ -131,6 +131,10 @@ model SupplierProfile {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // RSA Key Pair for digital signatures
+  publicKey      String? @db.Text // RSA public key (PEM format)
+  privateKeyHash String? // SHA256 hash of private key for validation
+
   user         User          @relation(fields: [userId], references: [id])
   warehouse    Warehouse?
   products     Product[]
@@ -224,6 +228,13 @@ model Order {
   status          OrderStatus @default(PENDING)
   deliveryAddress String
   updatedAt       DateTime    @updatedAt
+
+  // Digital signature fields for QR verification
+  orderHash         String?   @db.VarChar(64) // SHA256 hash of order data
+  supplierSignature String?   @db.Text // RSA signature by supplier
+  serverSignature   String?   @db.Text // RSA signature by server
+  qrToken           String?   @db.Text // Base64 encoded token for QR
+  signedAt          DateTime? // When signatures were created
 
   // Customer who placed the order
   customerId Int

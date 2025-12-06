@@ -1,5 +1,12 @@
 import prisma from "../config/database.js";
 import ResponseError from "../utils/customError.js";
+import {
+  validatePrivateKey,
+  computeOrderHash,
+  signData,
+  generateQrToken,
+  getServerPrivateKey,
+} from "../utils/crypto.js";
 
 // =====================================================
 // CUSTOMER ACTIONS
@@ -257,10 +264,15 @@ export async function confirmDelivery(orderId, customerId) {
 
 // 🟧 Approve order and create first leg (Supplier approves and assigns distributor)
 export async function approveOrder(orderId, supplierId, data) {
-  const { distributorId, transporterId } = data;
+  const { distributorId, transporterId, privateKey } = data;
+
+  // Validate privateKey is provided
+  if (!privateKey) {
+    throw new ResponseError("Private key is required to approve orders", 400);
+  }
 
   return await prisma.$transaction(async (tx) => {
-    // Get supplier profile
+    // Get supplier profile with keys
     const supplierProfile = await tx.supplierProfile.findUnique({
       where: { id: supplierId },
       include: { warehouse: true, user: true },
@@ -268,6 +280,18 @@ export async function approveOrder(orderId, supplierId, data) {
 
     if (!supplierProfile)
       throw new ResponseError("Supplier profile not found", 404);
+
+    // Validate supplier's private key
+    if (!supplierProfile.privateKeyHash) {
+      throw new ResponseError(
+        "Supplier keys not configured. Contact admin.",
+        500
+      );
+    }
+
+    if (!validatePrivateKey(privateKey, supplierProfile.privateKeyHash)) {
+      throw new ResponseError("Invalid private key", 401);
+    }
 
     const order = await tx.order.findUnique({
       where: { id: orderId },
@@ -321,10 +345,38 @@ export async function approveOrder(orderId, supplierId, data) {
       data: { quantity: { decrement: order.quantity } },
     });
 
-    // Update order status
+    // =====================================================
+    // DIGITAL SIGNATURE GENERATION
+    // =====================================================
+
+    // Compute order hash
+    const orderHash = computeOrderHash(order);
+
+    // Sign with supplier's private key
+    const supplierSignature = signData(orderHash, privateKey.trim());
+
+    // Sign with server's private key
+    const serverPrivateKey = getServerPrivateKey();
+    const serverSignature = signData(supplierSignature, serverPrivateKey);
+
+    // Generate QR token
+    const qrToken = generateQrToken({
+      orderId: order.id,
+      supplierSignature,
+      serverSignature,
+    });
+
+    // Update order with signatures and status
     await tx.order.update({
       where: { id: orderId },
-      data: { status: "APPROVED" },
+      data: {
+        status: "APPROVED",
+        orderHash,
+        supplierSignature,
+        serverSignature,
+        qrToken,
+        signedAt: new Date(),
+      },
     });
 
     // Create first leg: Supplier → Distributor
@@ -353,9 +405,13 @@ export async function approveOrder(orderId, supplierId, data) {
         fromUserId: supplierProfile.user.id,
         toUserId: distributor.user.id,
         status: "APPROVED",
-        description: `Order approved. Awaiting distributor ${distributor.businessName} acceptance.`,
+        description: `Order approved and signed. Awaiting distributor ${distributor.businessName} acceptance.`,
       },
     });
+
+    // Build verification URL
+    const baseUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const verificationUrl = `${baseUrl}/verify?token=${qrToken}`;
 
     return {
       order: await tx.order.findUnique({
@@ -363,6 +419,8 @@ export async function approveOrder(orderId, supplierId, data) {
         include: { product: true, legs: true },
       }),
       leg,
+      qrToken,
+      verificationUrl,
     };
   });
 }

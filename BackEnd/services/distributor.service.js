@@ -255,3 +255,101 @@ export async function getAllDistributorsAdmin() {
     },
   });
 }
+
+// =====================================================
+// LEG TRACKING
+// =====================================================
+
+// 🟦 Get all legs I've sent out (outgoing)
+export async function getOutgoingLegs(userId) {
+  const profile = await prisma.distributorProfile.findUnique({
+    where: { userId },
+  });
+
+  if (!profile) throw new ResponseError("Distributor profile not found", 404);
+
+  // Get all legs where this distributor is the sender (fromDistributorId)
+  const legs = await prisma.orderLeg.findMany({
+    where: { fromDistributorId: profile.id },
+    include: {
+      order: {
+        include: {
+          product: true,
+          customer: {
+            select: { id: true, name: true, email: true },
+          },
+          supplier: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
+      transporter: true,
+      toDistributor: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return legs;
+}
+
+// 🟦 Get specific leg by ID (if I'm involved)
+export async function getLegById(userId, legId) {
+  const profile = await prisma.distributorProfile.findUnique({
+    where: { userId },
+  });
+
+  if (!profile) throw new ResponseError("Distributor profile not found", 404);
+
+  const leg = await prisma.orderLeg.findUnique({
+    where: { id: legId },
+    include: {
+      order: {
+        include: {
+          product: true,
+          customer: {
+            select: { id: true, name: true, email: true },
+          },
+          supplier: {
+            include: {
+              user: { select: { id: true, name: true, email: true } },
+            },
+          },
+        },
+      },
+      transporter: true,
+      fromSupplier: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+      fromDistributor: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+      toDistributor: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+    },
+  });
+
+  if (!leg) throw new ResponseError("Order leg not found", 404);
+
+  // Check if this distributor is involved (either sender or receiver)
+  const isInvolved =
+    leg.fromDistributorId === profile.id || leg.toDistributorId === profile.id;
+
+  if (!isInvolved) {
+    throw new ResponseError("You are not involved in this delivery", 403);
+  }
+
+  return leg;
+}
