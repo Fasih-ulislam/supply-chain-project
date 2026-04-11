@@ -1,0 +1,36 @@
+export enum Role {
+    ADMIN = 'ADMIN',
+    SUPPLIER = 'SUPPLIER',
+    DISTRIBUTOR = 'DISTRIBUTOR',
+    CUSTOMER = 'CUSTOMER',
+}
+
+export enum OrderStatus {
+    PENDING = 'PENDING',
+    APPROVED = 'APPROVED',
+    PENDING_REASSIGN = 'PENDING_REASSIGN',
+    IN_PROGRESS = 'IN_PROGRESS',
+    DELIVERED = 'DELIVERED',
+    CANCELLED = 'CANCELLED',
+    REJECTED = 'REJECTED',
+}
+
+export enum LegStatus {
+    PENDING = 'PENDING',
+    ACCEPTED = 'ACCEPTED',
+    IN_TRANSIT = 'IN_TRANSIT',
+    DELIVERED = 'DELIVERED',
+    REJECTED = 'REJECTED',
+}
+
+export enum RequestStatus {
+    PENDING = 'PENDING',
+    APPROVED = 'APPROVED',
+    REJECTED = 'REJECTED',
+}
+
+export enum ParticipantType {
+    SUPPLIER = 'SUPPLIER',
+    DISTRIBUTOR = 'DISTRIBUTOR',
+    CUSTOMER = 'CUSTOMER',
+}

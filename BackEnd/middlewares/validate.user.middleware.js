@@ -27,18 +27,40 @@ export const authenticateUser = async (req, res, next) => {
 export const validateUserMiddleware = authenticateUser;
 
 // Authorize based on single role (user.role)
+// Also supports X-Active-Role header for multi-role users
 export function authorizeRoles(...allowedRoles) {
   return (req, res, next) => {
     const user = req.user;
 
-    // Check if user's role is in the allowed roles
-    if (!user.role || !allowedRoles.includes(user.role)) {
+    // Check for active role header (for users with multiple roles)
+    const activeRole = req.headers['x-active-role'];
+    let effectiveRole = user.role;
+
+    // If user has an active role header, validate and use it
+    if (activeRole) {
+      // Validate that user can use this role
+      const canUseRole =
+        activeRole === 'CUSTOMER' || // Everyone can be a customer
+        (activeRole === 'SUPPLIER' && user.supplierProfileId) ||
+        (activeRole === 'DISTRIBUTOR' && user.distributorProfileId) ||
+        (activeRole === 'ADMIN' && user.role === 'ADMIN');
+
+      if (canUseRole) {
+        effectiveRole = activeRole;
+      }
+    }
+
+    // Check if user's effective role is in the allowed roles
+    if (!effectiveRole || !allowedRoles.includes(effectiveRole)) {
       return res.status(403).json({
         message: `Access denied. Required roles: ${allowedRoles.join(
           ", "
-        )}. Your role: ${user.role || "none"}`,
+        )}. Your role: ${effectiveRole || "none"}`,
       });
     }
+
+    // Store effective role in request for use in controllers
+    req.effectiveRole = effectiveRole;
 
     next();
   };

@@ -175,6 +175,9 @@ export async function deleteProduct(userId, productId) {
     return tx.product.delete({
       where: { id: productId },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -221,6 +224,9 @@ export async function addToInventory(userId, data) {
       },
       include: { product: true },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -252,6 +258,9 @@ export async function updateInventory(userId, inventoryId, quantity) {
       data: { quantity },
       include: { product: true },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -267,7 +276,10 @@ export async function getMyInventory(userId) {
 
   return prisma.inventory.findMany({
     where: { warehouseId: profile.warehouse.id },
-    include: { product: true },
+    include: {
+      product: true,
+      warehouse: true
+    },
   });
 }
 
@@ -309,6 +321,9 @@ export async function removeFromInventory(userId, inventoryId) {
     return tx.inventory.delete({
       where: { id: inventoryId },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -408,6 +423,9 @@ export async function deleteTransporter(userId, transporterId) {
     return tx.transporter.delete({
       where: { id: transporterId },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -430,12 +448,50 @@ export async function getMyOrders(userId) {
       customer: {
         select: { id: true, name: true, email: true },
       },
+      supplier: {
+        include: {
+          user: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+      },
       legs: {
         include: {
           transporter: true,
-          toDistributor: true,
+          toDistributor: {
+            include: {
+              user: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+          fromSupplier: {
+            include: {
+              user: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+          fromDistributor: {
+            include: {
+              user: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
         },
         orderBy: { legNumber: "asc" },
+      },
+      trackingEvents: {
+        include: {
+          fromUser: {
+            select: { id: true, name: true, email: true },
+          },
+          toUser: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+        orderBy: { timestamp: "desc" },
       },
     },
     orderBy: { orderDate: "desc" },

@@ -59,6 +59,9 @@ export async function acceptLeg(legId, distributorId) {
     });
 
     return updatedLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -108,6 +111,15 @@ export async function rejectLeg(legId, distributorId, reason) {
       });
     }
 
+    // If this was from a distributor, mark the leg for reassignment
+    // so the sending distributor can reassign to a different target
+    if (leg.fromType === "DISTRIBUTOR") {
+      await tx.orderLeg.update({
+        where: { id: legId },
+        data: { status: "REJECTED" },
+      });
+    }
+
     const senderUserId =
       leg.fromSupplier?.user.id || leg.fromDistributor?.user.id;
 
@@ -125,6 +137,9 @@ export async function rejectLeg(legId, distributorId, reason) {
     });
 
     return updatedLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -177,6 +192,9 @@ export async function confirmReceipt(legId, distributorId) {
     });
 
     return updatedLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -297,13 +315,15 @@ export async function forwardOrder(orderId, distributorId, data) {
         fromUserId: distributorProfile.user.id,
         toUserId: recipientUserId,
         status: "PENDING",
-        description: `Forwarded to ${
-          toType === "CUSTOMER" ? "customer" : "distributor"
-        } ${recipientName}`,
+        description: `Forwarded to ${toType === "CUSTOMER" ? "customer" : "distributor"
+          } ${recipientName}`,
       },
     });
 
     return newLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -370,13 +390,15 @@ export async function shipForward(legId, distributorId) {
         fromUserId: distributorProfile.user.id,
         toUserId: recipientUserId,
         status: "IN_TRANSIT",
-        description: `Shipped to ${
-          leg.toType === "CUSTOMER" ? "customer" : "distributor"
-        } ${recipientName}`,
+        description: `Shipped to ${leg.toType === "CUSTOMER" ? "customer" : "distributor"
+          } ${recipientName}`,
       },
     });
 
     return updatedLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -404,4 +426,103 @@ export async function getLegById(legId) {
   if (!leg) throw new ResponseError("Order leg not found", 404);
 
   return leg;
+}
+
+// 🟧 Reassign rejected leg (distributor reassigns to different target)
+export async function reassignDistributorLeg(
+  legId,
+  distributorId,
+  newDistributorId,
+  transporterId
+) {
+  return await prisma.$transaction(async (tx) => {
+    const distributorProfile = await tx.distributorProfile.findUnique({
+      where: { id: distributorId },
+      include: { user: true },
+    });
+
+    if (!distributorProfile) {
+      throw new ResponseError("Distributor profile not found", 404);
+    }
+
+    // Get the rejected leg
+    const leg = await tx.orderLeg.findUnique({
+      where: { id: legId },
+      include: {
+        order: true,
+        transporter: true,
+      },
+    });
+
+    if (!leg) throw new ResponseError("Order leg not found", 404);
+    if (leg.fromDistributorId !== distributorId) {
+      throw new ResponseError("You are not the sender of this leg", 403);
+    }
+    if (leg.status !== "REJECTED") {
+      throw new ResponseError(
+        "Can only reassign rejected legs",
+        400
+      );
+    }
+
+    // Verify new distributor exists
+    const newDistributor = await tx.distributorProfile.findUnique({
+      where: { id: newDistributorId },
+      include: { user: true },
+    });
+
+    if (!newDistributor) {
+      throw new ResponseError("New distributor not found", 404);
+    }
+    if (newDistributorId === distributorId) {
+      throw new ResponseError("Cannot reassign to yourself", 400);
+    }
+
+    // Verify transporter belongs to this distributor
+    const transporter = await tx.transporter.findUnique({
+      where: { id: transporterId },
+    });
+
+    if (!transporter) throw new ResponseError("Transporter not found", 404);
+    if (transporter.distributorId !== distributorId) {
+      throw new ResponseError("This transporter does not belong to you", 403);
+    }
+
+    const newLegNumber = leg ? leg.legNumber + 1 : 1;
+    // Create a NEW leg instead of updating the old rejected one
+    // This maintains the history of the rejection
+    const newLeg = await tx.orderLeg.create({
+      data: {
+        orderId: leg.orderId,
+        legNumber: newLegNumber, // Keep the same leg number, but this is a new attempt
+        fromType: "DISTRIBUTOR",
+        fromDistributorId: distributorId,
+        toType: "DISTRIBUTOR",
+        toDistributorId: newDistributorId,
+        transporterId: transporterId,
+        status: "PENDING",
+      },
+      include: {
+        transporter: true,
+        toDistributor: { include: { user: { select: { name: true } } } },
+      },
+    });
+
+    // Create tracking event
+    await tx.trackingEvent.create({
+      data: {
+        orderId: leg.orderId,
+        legId: newLeg.id,
+        fromUserId: distributorProfile.user.id,
+        toUserId: newDistributor.user.id,
+        status: "PENDING",
+        description: `New leg created after rejection - assigned to ${newDistributor.businessName} by ${distributorProfile.businessName}`,
+      },
+    });
+
+    return newLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
+  });
 }

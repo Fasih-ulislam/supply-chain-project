@@ -51,6 +51,9 @@ router.post("/legs/:legId/ship", distributorController.shipForward);
 // Forward to another distributor or to customer
 router.post("/orders/:orderId/forward", distributorController.forwardOrder);
 
+// Reassign a rejected leg to a different distributor
+router.post("/legs/:legId/reassign", distributorController.reassignLeg);
+
 // =====================================================
 // LEG TRACKING
 // =====================================================

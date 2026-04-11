@@ -5,11 +5,11 @@ const errorHandler = (error, req, res, next) => {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     // Known error (e.g., constraint violation)
     console.error(error);
-    return res.status(400).json({ error: extractSafeMessage(error.code) });
+    return res.status(400).json({ message: extractSafeMessage(error.code) });
   } else if (error instanceof Prisma.PrismaClientValidationError) {
     // Validation error (e.g., wrong input types)
     console.error(error);
-    return res.status(400).json({ error: extractSafeMessage(error.code) });
+    return res.status(400).json({ message: extractSafeMessage(error.code) });
   } else {
     console.error(error);
 
@@ -17,11 +17,11 @@ const errorHandler = (error, req, res, next) => {
     if (error instanceof ResponseError) {
       return res
         .status(error.code || 500)
-        .json({ error: error.message || "Internal Server Error" });
+        .json({ message: error.message || "Internal Server Error" });
     }
 
     // Other Errors
-    return res.status(500).json({ error: "Internal Server Error" });
+    return res.status(500).json({ message: "Internal Server Error" });
   }
 };
 

@@ -1,0 +1,466 @@
+'use client';
+
+import { useState } from 'react';
+import { Package, Send, ArrowRight, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
+import { Spinner } from '@/components/ui/Spinner';
+import { Dialog } from '@/components/ui/Dialog';
+import { Label } from '@/components/ui/Label';
+import Container from '@/components/layout/Container';
+import { useToast } from '@/context/ToastContext';
+import { distributorService } from '@/services/distributorService';
+import { useFetch } from '@/hooks/useFetch';
+import { formatDate, formatCurrency } from '@/lib/utils';
+
+export default function HeldOrdersPage() {
+    const { showToast } = useToast();
+    const [showForwardDialog, setShowForwardDialog] = useState(false);
+    const [showReassignDialog, setShowReassignDialog] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<any>(null);
+    const [selectedLeg, setSelectedLeg] = useState<any>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [forwardForm, setForwardForm] = useState({
+        toType: 'CUSTOMER',
+        toDistributorId: '',
+        transporterId: ''
+    });
+    const [reassignForm, setReassignForm] = useState({
+        toDistributorId: '',
+        transporterId: ''
+    });
+
+    const { data: heldOrders, isLoading, refetch } = useFetch(
+        () => distributorService.getHeldOrders()
+    );
+
+    const { data: outgoingLegs, refetch: refetchLegs } = useFetch(
+        () => distributorService.getOutgoingLegs()
+    );
+
+    const { data: distributors } = useFetch(
+        () => distributorService.getDistributors()
+    );
+
+    const { data: transporters } = useFetch(
+        () => distributorService.getTransporters()
+    );
+
+    const handleForward = (order: any) => {
+        setSelectedOrder(order);
+        setForwardForm({ toType: 'CUSTOMER', toDistributorId: '', transporterId: '' });
+        setShowForwardDialog(true);
+    };
+
+    const handleReassign = (leg: any) => {
+        setSelectedLeg(leg);
+        setReassignForm({ toDistributorId: '', transporterId: '' });
+        setShowReassignDialog(true);
+    };
+
+    const submitForward = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedOrder) return;
+
+        try {
+            setIsSubmitting(true);
+            const payload: any = {
+                toType: forwardForm.toType,
+                transporterId: parseInt(forwardForm.transporterId)
+            };
+
+            if (forwardForm.toType === 'DISTRIBUTOR') {
+                payload.toDistributorId = parseInt(forwardForm.toDistributorId);
+            }
+
+            await distributorService.forwardOrder(selectedOrder.id, payload);
+            showToast(`Order forwarded to ${forwardForm.toType === 'CUSTOMER' ? 'customer' : 'distributor'} successfully!`, "success");
+            setShowForwardDialog(false);
+            refetch();
+            refetchLegs();
+        } catch (error: any) {
+            showToast(error.response?.data?.message || "Failed to forward order", "error");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const submitReassign = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedLeg) return;
+
+        try {
+            setIsSubmitting(true);
+            await distributorService.reassignLeg(selectedLeg.id, {
+                toDistributorId: parseInt(reassignForm.toDistributorId),
+                transporterId: parseInt(reassignForm.transporterId)
+            });
+            showToast("Leg reassigned successfully!", "success");
+            setShowReassignDialog(false);
+            refetchLegs();
+        } catch (error: any) {
+            showToast(error.response?.data?.message || "Failed to reassign leg", "error");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    if (isLoading) {
+        return (
+            <Container>
+                <div className="flex items-center justify-center min-h-[400px]">
+                    <Spinner size="lg" />
+                </div>
+            </Container>
+        );
+    }
+
+    return (
+        <Container>
+            <div className="space-y-6">
+                {/* Header */}
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight">Held Orders</h1>
+                    <p className="text-muted-foreground mt-2">
+                        Orders you've received and can forward to customers or other distributors
+                    </p>
+                </div>
+
+                {/* Statistics */}
+                <div className="grid gap-4 md:grid-cols-3">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Total Held</CardTitle>
+                            <Package className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{heldOrders?.length || 0}</div>
+                            <p className="text-xs text-muted-foreground">Orders in your warehouse</p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+                            <Package className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">
+                                {formatCurrency(heldOrders?.reduce((sum: number, leg: any) => sum + (leg.order?.totalAmount || 0), 0) || 0)}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Total inventory value</p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Awaiting Forward</CardTitle>
+                            <Send className="h-4 w-4 text-muted-foreground" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">{heldOrders?.length || 0}</div>
+                            <p className="text-xs text-muted-foreground">Ready to ship</p>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* Rejected Legs Needing Reassignment */}
+                {outgoingLegs?.filter((leg: any) => leg.status === 'REJECTED').length > 0 && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Rejected Deliveries</CardTitle>
+                            <CardDescription>
+                                Deliveries rejected by distributors that need reassignment
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Leg ID</TableHead>
+                                        <TableHead>Order ID</TableHead>
+                                        <TableHead>Product</TableHead>
+                                        <TableHead>Rejected By</TableHead>
+                                        <TableHead>Date</TableHead>
+                                        <TableHead>Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {outgoingLegs.filter((leg: any) => leg.status === 'REJECTED').map((leg: any) => (
+                                        <TableRow key={leg.id}>
+                                            <TableCell className="font-medium">#{leg.id}</TableCell>
+                                            <TableCell>#{leg.orderId}</TableCell>
+                                            <TableCell>{leg.order?.product?.name || "N/A"}</TableCell>
+                                            <TableCell>{leg.toDistributor?.businessName || "N/A"}</TableCell>
+                                            <TableCell>{formatDate(leg.updatedAt)}</TableCell>
+                                            <TableCell>
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    onClick={() => handleReassign(leg)}
+                                                >
+                                                    <RefreshCw className="mr-1 h-4 w-4" />
+                                                    Reassign
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* Orders Table */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Held Inventory</CardTitle>
+                        <CardDescription>
+                            Orders you've received that you can forward
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        {!heldOrders || heldOrders.length === 0 ? (
+                            <div className="text-center py-12">
+                                <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                                <p className="text-muted-foreground">No held orders</p>
+                                <p className="text-sm text-gray-500 mt-1">Orders you receive will appear here</p>
+                            </div>
+                        ) : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Order ID</TableHead>
+                                        <TableHead>Product</TableHead>
+                                        <TableHead>Quantity</TableHead>
+                                        <TableHead>Total Value</TableHead>
+                                        <TableHead>Customer</TableHead>
+                                        <TableHead>Delivery Address</TableHead>
+                                        <TableHead>Received Date</TableHead>
+                                        <TableHead>Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {heldOrders.map((leg: any) => (
+                                        <TableRow key={leg.id}>
+                                            <TableCell className="font-medium">#{leg.order?.id || "N/A"}</TableCell>
+                                            <TableCell>{leg.order?.product?.name || "N/A"}</TableCell>
+                                            <TableCell>{leg.order?.quantity || "N/A"}</TableCell>
+                                            <TableCell>{formatCurrency(leg.order?.totalAmount || 0)}</TableCell>
+                                            <TableCell>{leg.order?.customer?.name || "N/A"}</TableCell>
+                                            <TableCell className="max-w-xs truncate">{leg.order?.deliveryAddress || "N/A"}</TableCell>
+                                            <TableCell>{formatDate(leg.updatedAt)}</TableCell>
+                                            <TableCell>
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    onClick={() => handleForward(leg.order)}
+                                                >
+                                                    <Send className="mr-1 h-4 w-4" />
+                                                    Process
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        )}
+                    </CardContent>
+                </Card>
+                    </CardContent>
+                </Card>
+
+                {/* Forward Order Dialog */}
+                <Dialog open={showForwardDialog} onClose={() => setShowForwardDialog(false)}>
+                    <div className="p-6">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-6">Process Order</h2>
+                        {selectedOrder && (
+                            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <h3 className="font-semibold text-gray-900 mb-2">Order #{selectedOrder.id}</h3>
+                                <div className="space-y-1 text-sm">
+                                    <p className="text-gray-600">Product: <span className="font-medium">{selectedOrder.product?.name}</span></p>
+                                    <p className="text-gray-600">Quantity: <span className="font-medium">{selectedOrder.quantity}</span></p>
+                                    <p className="text-gray-600">Customer: <span className="font-medium">{selectedOrder.customer?.name}</span></p>
+                                    <p className="text-gray-600">Delivery: <span className="font-medium">{selectedOrder.deliveryAddress}</span></p>
+                                </div>
+                            </div>
+                        )}
+                        <form onSubmit={submitForward} className="space-y-4">
+                            <div>
+                                <Label>Send To *</Label>
+                                <div className="grid grid-cols-2 gap-4 mt-2">
+                                    <div
+                                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${forwardForm.toType === 'CUSTOMER'
+                                                ? 'border-blue-500 bg-blue-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        onClick={() => setForwardForm({ ...forwardForm, toType: 'CUSTOMER', toDistributorId: '' })}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="radio"
+                                                name="toType"
+                                                value="CUSTOMER"
+                                                checked={forwardForm.toType === 'CUSTOMER'}
+                                                onChange={(e) => setForwardForm({ ...forwardForm, toType: e.target.value, toDistributorId: '' })}
+                                                className="h-4 w-4"
+                                            />
+                                            <div>
+                                                <p className="font-medium">Customer</p>
+                                                <p className="text-xs text-gray-500">Direct delivery</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div
+                                        className={`p-4 border-2 rounded-lg cursor-pointer transition ${forwardForm.toType === 'DISTRIBUTOR'
+                                                ? 'border-blue-500 bg-blue-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        onClick={() => setForwardForm({ ...forwardForm, toType: 'DISTRIBUTOR' })}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="radio"
+                                                name="toType"
+                                                value="DISTRIBUTOR"
+                                                checked={forwardForm.toType === 'DISTRIBUTOR'}
+                                                onChange={(e) => setForwardForm({ ...forwardForm, toType: e.target.value })}
+                                                className="h-4 w-4"
+                                            />
+                                            <div>
+                                                <p className="font-medium">Another Distributor</p>
+                                                <p className="text-xs text-gray-500">Multi-hop delivery</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {forwardForm.toType === 'DISTRIBUTOR' && (
+                                <div>
+                                    <Label htmlFor="distributor">Select Distributor *</Label>
+                                    <select
+                                        id="distributor"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        value={forwardForm.toDistributorId}
+                                        onChange={(e) => setForwardForm({ ...forwardForm, toDistributorId: e.target.value })}
+                                        required
+                                    >
+                                        <option value="">Choose a distributor</option>
+                                        {distributors?.map((dist: any) => (
+                                            <option key={dist.id} value={dist.id}>
+                                                {dist.businessName} - {dist.user?.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            <div>
+                                <Label htmlFor="transporter">Select Transporter *</Label>
+                                <select
+                                    id="transporter"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={forwardForm.transporterId}
+                                    onChange={(e) => setForwardForm({ ...forwardForm, transporterId: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Choose a transporter</option>
+                                    {transporters?.map((trans: any) => (
+                                        <option key={trans.id} value={trans.id}>
+                                            {trans.name} - {trans.phone}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="bg-gray-50 p-4 rounded-lg">
+                                <div className="flex items-center gap-2 text-sm text-gray-700">
+                                    <ArrowRight className="h-4 w-4" />
+                                    <span>
+                                        This order will be sent to{' '}
+                                        <span className="font-semibold">
+                                            {forwardForm.toType === 'CUSTOMER' ? 'the customer' : 'another distributor'}
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <Button type="submit" disabled={isSubmitting}>
+                                    {isSubmitting ? 'Processing...' : 'Process Order'}
+                                </Button>
+                                <Button type="button" variant="outline" onClick={() => setShowForwardDialog(false)}>
+                                    Cancel
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </Dialog>
+
+                {/* Reassign Leg Dialog */}
+                <Dialog open={showReassignDialog} onClose={() => setShowReassignDialog(false)}>
+                    <div className="p-6">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-6">Reassign Rejected Leg</h2>
+                        {selectedLeg && (
+                            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                                <h3 className="font-semibold text-gray-900 mb-2">Leg #{selectedLeg.id}</h3>
+                                <div className="space-y-1 text-sm">
+                                    <p className="text-gray-600">Order: <span className="font-medium">#{selectedLeg.orderId}</span></p>
+                                    <p className="text-gray-600">Product: <span className="font-medium">{selectedLeg.order?.product?.name}</span></p>
+                                    <p className="text-gray-600">Previously Rejected By: <span className="font-medium">{selectedLeg.toDistributor?.businessName}</span></p>
+                                </div>
+                            </div>
+                        )}
+                        <form onSubmit={submitReassign} className="space-y-4">
+                            <div>
+                                <Label htmlFor="reassign-distributor">Select New Distributor *</Label>
+                                <select
+                                    id="reassign-distributor"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={reassignForm.toDistributorId}
+                                    onChange={(e) => setReassignForm({ ...reassignForm, toDistributorId: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Choose a distributor</option>
+                                    {distributors?.filter((dist: any) => dist.id !== selectedLeg?.toDistributorId).map((dist: any) => (
+                                        <option key={dist.id} value={dist.id}>
+                                            {dist.businessName} - {dist.user?.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <Label htmlFor="reassign-transporter">Select Transporter *</Label>
+                                <select
+                                    id="reassign-transporter"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={reassignForm.transporterId}
+                                    onChange={(e) => setReassignForm({ ...reassignForm, transporterId: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Choose a transporter</option>
+                                    {transporters?.map((trans: any) => (
+                                        <option key={trans.id} value={trans.id}>
+                                            {trans.name} - {trans.phone}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <Button type="submit" disabled={isSubmitting}>
+                                    {isSubmitting ? 'Reassigning...' : 'Reassign Leg'}
+                                </Button>
+                                <Button type="button" variant="outline" onClick={() => setShowReassignDialog(false)}>
+                                    Cancel
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                </Dialog>
+            </div>
+        </Container>
+    );
+}

@@ -197,6 +197,29 @@ export async function forwardOrder(req, res, next) {
   }
 }
 
+// 🟧 Reassign rejected leg
+export async function reassignLeg(req, res, next) {
+  try {
+    const legId = parseInt(req.params.legId);
+    if (isNaN(legId)) throw new ResponseError("Invalid leg ID", 400);
+
+    const { toDistributorId, transporterId } = req.body;
+    if (!toDistributorId || !transporterId) {
+      throw new ResponseError("toDistributorId and transporterId are required", 400);
+    }
+
+    const leg = await orderLegService.reassignDistributorLeg(
+      legId,
+      req.user.distributorProfileId,
+      parseInt(toDistributorId),
+      parseInt(transporterId)
+    );
+    res.json({ message: "Leg reassigned successfully", leg });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // 🟧 Ship forward (mark leg as in-transit)
 export async function shipForward(req, res, next) {
   try {

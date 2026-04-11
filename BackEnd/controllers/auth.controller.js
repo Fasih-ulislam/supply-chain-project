@@ -1,4 +1,5 @@
 import * as authService from "../services/auth.service.js";
+import * as userService from "../services/user.service.js";
 import ResponseError from "../utils/customError.js";
 import {
   pendingUserSchema,
@@ -106,13 +107,22 @@ export async function verifyOtp(req, res, next) {
 // Get current user info
 export async function getCurrentUser(req, res, next) {
   try {
-    const user = req.user;
+    const tokenUser = req.user;
+
+    // Fetch user from database to get the name
+    const user = await userService.getUserById(tokenUser.id);
+
+    if (!user) {
+      throw new ResponseError('User not found', 404);
+    }
+
     res.json({
       id: user.id,
       email: user.email,
+      name: user.name,
       role: user.role,
-      supplierProfileId: user.supplierProfileId,
-      distributorProfileId: user.distributorProfileId,
+      supplierProfileId: user.supplierProfile?.id || null,
+      distributorProfileId: user.distributorProfile?.id || null,
     });
   } catch (err) {
     next(err);

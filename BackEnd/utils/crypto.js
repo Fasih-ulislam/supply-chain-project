@@ -6,22 +6,29 @@ import crypto from "crypto";
 
 /**
  * Generate RSA key pair for a supplier
- * @returns {{ publicKey: string, privateKey: string }}
+ * @returns {Promise<{ publicKey: string, privateKey: string }>}
  */
-export function generateKeyPair() {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
-    modulusLength: 2048,
-    publicKeyEncoding: {
-      type: "spki",
-      format: "pem",
-    },
-    privateKeyEncoding: {
-      type: "pkcs8",
-      format: "pem",
-    },
+export async function generateKeyPair() {
+  return new Promise((resolve, reject) => {
+    crypto.generateKeyPair(
+      "rsa",
+      {
+        modulusLength: 2048,
+        publicKeyEncoding: {
+          type: "spki",
+          format: "pem",
+        },
+        privateKeyEncoding: {
+          type: "pkcs8",
+          format: "pem",
+        },
+      },
+      (err, publicKey, privateKey) => {
+        if (err) reject(err);
+        else resolve({ publicKey, privateKey });
+      }
+    );
   });
-
-  return { publicKey, privateKey };
 }
 
 // =====================================================
@@ -159,14 +166,44 @@ export function parseQrToken(token) {
 // =====================================================
 
 /**
+ * Normalize private key to standard PEM format
+ * @param {string} privateKey - Private key in any format
+ * @returns {string} Normalized private key
+ */
+export function normalizePrivateKey(privateKey) {
+  const beginMarker = '-----BEGIN PRIVATE KEY-----';
+  const endMarker = '-----END PRIVATE KEY-----';
+
+  let base64Content = privateKey.trim();
+
+  // Remove headers if present
+  if (base64Content.includes(beginMarker)) {
+    base64Content = base64Content.split(beginMarker)[1];
+  }
+  if (base64Content.includes(endMarker)) {
+    base64Content = base64Content.split(endMarker)[0];
+  }
+
+  // Remove ALL whitespace (spaces, newlines, tabs, etc.)
+  base64Content = base64Content.replace(/\s/g, '');
+
+  // Reconstruct with proper 64-character lines
+  const lines = [];
+  for (let i = 0; i < base64Content.length; i += 64) {
+    lines.push(base64Content.substring(i, i + 64));
+  }
+
+  return beginMarker + '\n' + lines.join('\n') + '\n' + endMarker;
+}
+
+/**
  * Validate supplier's private key against stored hash
  * @param {string} privateKey - Private key provided by supplier
  * @param {string} storedHash - Hash stored in database
  * @returns {boolean} True if valid
  */
 export function validatePrivateKey(privateKey, storedHash) {
-  // Normalize the key (remove extra whitespace)
-  const normalizedKey = privateKey.trim();
+  const normalizedKey = normalizePrivateKey(privateKey);
   const computedHash = sha256Hash(normalizedKey);
 
   // Use timing-safe comparison to prevent timing attacks

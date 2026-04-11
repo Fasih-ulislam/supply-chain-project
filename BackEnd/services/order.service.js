@@ -2,10 +2,12 @@ import prisma from "../config/database.js";
 import ResponseError from "../utils/customError.js";
 import {
   validatePrivateKey,
+  normalizePrivateKey,
   computeOrderHash,
   signData,
   generateQrToken,
   getServerPrivateKey,
+  sha256Hash,
 } from "../utils/crypto.js";
 
 // =====================================================
@@ -90,6 +92,9 @@ export async function createOrder(customerId, data) {
     });
 
     return order;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -116,7 +121,7 @@ export async function getMyOrders(customerId) {
   });
 }
 
-// 🟧 Cancel order (Customer cancels before first shipment)
+//  Cancel order (Customer cancels before first shipment)
 export async function cancelOrder(orderId, customerId) {
   return await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
@@ -200,6 +205,9 @@ export async function cancelOrder(orderId, customerId) {
     });
 
     return updatedOrder;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -255,6 +263,9 @@ export async function confirmDelivery(orderId, customerId) {
     });
 
     return updatedOrder;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -289,9 +300,49 @@ export async function approveOrder(orderId, supplierId, data) {
       );
     }
 
+    // Debug logging
+    console.log("=== Private Key Validation Debug ===");
+    console.log("RAW INPUT:");
+    console.log("Length:", privateKey.length);
+    console.log("First 100 chars:", privateKey.substring(0, 100));
+    console.log("Has newlines:", privateKey.includes('\n'));
+
+    console.log("\nSTORED HASH:", supplierProfile.privateKeyHash);
+
+    // Test with new normalization
+    const beginMarker = '-----BEGIN PRIVATE KEY-----';
+    const endMarker = '-----END PRIVATE KEY-----';
+    let base64Content = privateKey.trim();
+    if (base64Content.includes(beginMarker)) {
+      base64Content = base64Content.split(beginMarker)[1];
+    }
+    if (base64Content.includes(endMarker)) {
+      base64Content = base64Content.split(endMarker)[0];
+    }
+    base64Content = base64Content.replace(/\s/g, '');
+
+    const lines = [];
+    for (let i = 0; i < base64Content.length; i += 64) {
+      lines.push(base64Content.substring(i, i + 64));
+    }
+    const normalizedKey = beginMarker + '\n' + lines.join('\n') + '\n' + endMarker;
+
+    console.log("\nNORMALIZED KEY:");
+    console.log("Length:", normalizedKey.length);
+    console.log("First 100 chars:", normalizedKey.substring(0, 100));
+
+    const computedHash = sha256Hash(normalizedKey);
+    console.log("\nComputed hash:", computedHash);
+    console.log("Stored hash:  ", supplierProfile.privateKeyHash);
+    console.log("Hashes match: ", computedHash === supplierProfile.privateKeyHash);
+    console.log("====================================");
+
     if (!validatePrivateKey(privateKey, supplierProfile.privateKeyHash)) {
       throw new ResponseError("Invalid private key", 401);
     }
+
+    // Normalize the private key for use in signing
+    const normalizedPrivateKey = normalizePrivateKey(privateKey);
 
     const order = await tx.order.findUnique({
       where: { id: orderId },
@@ -352,12 +403,18 @@ export async function approveOrder(orderId, supplierId, data) {
     // Compute order hash
     const orderHash = computeOrderHash(order);
 
-    // Sign with supplier's private key
-    const supplierSignature = signData(orderHash, privateKey.trim());
+    // Sign with supplier's private key (use normalized key)
+    const supplierSignature = signData(orderHash, normalizedPrivateKey);
 
-    // Sign with server's private key
+  
+
+
+
     const serverPrivateKey = getServerPrivateKey();
     const serverSignature = signData(supplierSignature, serverPrivateKey);
+
+
+    
 
     // Generate QR token
     const qrToken = generateQrToken({
@@ -422,6 +479,9 @@ export async function approveOrder(orderId, supplierId, data) {
       qrToken,
       verificationUrl,
     };
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -468,6 +528,9 @@ export async function rejectOrder(orderId, supplierId, reason) {
     });
 
     return updatedOrder;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -530,6 +593,9 @@ export async function shipOrder(orderId, supplierId, legId) {
     });
 
     return updatedLeg;
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -645,6 +711,9 @@ export async function reassignOrder(orderId, supplierId, data) {
       }),
       leg: newLeg,
     };
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 

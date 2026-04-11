@@ -60,7 +60,7 @@ export async function createTransporter(userId, data) {
   });
 }
 
-// 🟦 Get my transporters
+//  Get my transporters
 export async function getMyTransporters(userId) {
   const profile = await prisma.distributorProfile.findUnique({
     where: { userId },
@@ -73,7 +73,7 @@ export async function getMyTransporters(userId) {
   });
 }
 
-// 🟧 Update transporter
+// Update transporter
 export async function updateTransporter(userId, transporterId, data) {
   const profile = await prisma.distributorProfile.findUnique({
     where: { userId },
@@ -135,6 +135,9 @@ export async function deleteTransporter(userId, transporterId) {
     return tx.transporter.delete({
       where: { id: transporterId },
     });
+  }, {
+    maxWait: 15000,
+    timeout: 15000
   });
 }
 
@@ -273,7 +276,14 @@ export async function getOutgoingLegs(userId) {
     where: { fromDistributorId: profile.id },
     include: {
       order: {
-        include: {
+        select: {
+          id: true,
+          quantity: true,
+          totalAmount: true,
+          status: true,
+          qrToken: true,
+          signedAt: true,
+          orderDate: true,
           product: true,
           customer: {
             select: { id: true, name: true, email: true },

@@ -50,6 +50,8 @@ export const userUpdateSchema = Joi.object({
     )
     .optional(),
   picture: Joi.string().uri().optional(),
+  phone: Joi.string().trim().min(10).max(15).optional(),
+  address: Joi.string().trim().max(200).optional(),
 }).unknown(false);
 
 export const otpSchema = Joi.object({

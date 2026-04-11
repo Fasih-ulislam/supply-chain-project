@@ -10,6 +10,7 @@ import errorHandler from "./middlewares/globalErrorHandler.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import { apiLimiter } from "./middlewares/rateLimit.middleware.js";
 
 //Main server instance
 const app = express();
@@ -20,12 +21,17 @@ app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
 //Security helmet
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 
 //CORS --> Restrict to allowed origins in production
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
   : ["http://localhost:3000", "http://localhost:5173"];
+
+console.log("Allowed CORS origins:", allowedOrigins);
 
 app.use(
   cors({
@@ -41,7 +47,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Active-Role"],
   })
 );
 
@@ -51,7 +57,7 @@ app.use(cookieParser());
 /***************** ROUTING ****************/
 
 // -------> Health Check <--------
-app.get("/health-check", (req, res) => {
+app.get("/health-check", apiLimiter, (req, res) => {
   res.status(200).json("OK");
 });
 
