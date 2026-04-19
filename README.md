@@ -1,5 +1,12 @@
 # Supply Chain Management System
 
+![Next.js](https://img.shields.io/badge/Next.js-14-black)
+![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC)
+![Security](https://img.shields.io/badge/RSA-Digital_Signatures-blueviolet)
+![MySQL](https://img.shields.io/badge/Database-MySQL-4479A1)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 A full-stack multi-role supply chain platform that handles end-to-end order lifecycle management -- from suppliers to distributors to customers -- with RSA digital signatures and QR code verification to ensure order authenticity and prevent tampering.
 
 ---
@@ -16,22 +23,52 @@ A full-stack multi-role supply chain platform that handles end-to-end order life
 
 ---
 
+## Why This Exists
+
+Traditional supply chains have a trust problem -- once a package leaves a supplier's hands, there is no reliable way for a customer to verify that what they receive is what was actually approved and shipped. This platform treats every order as a verifiable cryptographic record. Using RSA digital signatures and QR-based verification, the system ensures that from the moment a supplier approves an order to the moment a customer receives it, the data is authenticated and tamper-evident.
+
+## Security Model
+
+This is not a standard CRUD application. The platform implements a trust-but-verify approach across three layers:
+
+- **Cryptographic integrity** -- Suppliers sign order hashes using RSA private keys generated and delivered to them by the Admin via Nodemailer. No one else can forge an approval.
+- **Physical-digital link** -- Each approved order generates a QR token. Customers scan it on delivery to verify the supplier's signature against the order hash, bridging the physical package with its digital record.
+- **Role-based access control** -- A strict four-role hierarchy (Admin, Supplier, Distributor, Customer) ensures each party only sees and acts on what they are supposed to.
+
+---
+
+## System Architecture
+
+### Order Flow
+
+1. **Customer** places an order → status: `PENDING`
+2. **Admin** approves the supplier's role and generates their RSA key pair, delivered via email
+3. **Supplier** approves the order -- signs the order hash with their RSA private key, assigns a distributor, and a QR token is generated → status: `APPROVED`
+4. **Distributor** accepts the leg, confirms receipt, and ships onward → status: `IN_PROGRESS`
+5. If a distributor rejects, the order returns to the supplier for reassignment
+6. **Customer** receives the package, scans the QR code to verify the RSA signature, and confirms delivery → status: `DELIVERED`
+
+### Flow Diagram
+
+## ![flow-diagram](supply_chain_order_flow.svg)
+
 ## Features
 
-- **Multi-Role Access** — Four distinct roles (Admin, Supplier, Distributor, Customer) each with their own dashboard and permissions
-- **Order Lifecycle Management** — Full order flow covering creation, approval, rejection, reassignment, multi-leg distributor routing, and delivery confirmation
-- **RSA Digital Signatures** — Orders are hashed and signed by suppliers using RSA key pairs; customers can verify authenticity on delivery
-- **QR Code Verification** — Tamper-proof QR codes generated per order, scannable by customers to confirm integrity
-- **Inventory Control** — Stock automatically deducted on order approval with oversell prevention
-- **Audit Trail** — All order status changes are logged with tracking events
+- **Multi-Role Access** -- Four distinct roles (Admin, Supplier, Distributor, Customer) each with their own dashboard and permissions
+- **Order Lifecycle Management** -- Full order flow covering creation, approval, rejection, reassignment, multi-leg distributor routing, and delivery confirmation
+- **RSA Digital Signatures** -- Orders are hashed and signed by suppliers using RSA key pairs; customers can verify authenticity on delivery
+- **QR Code Verification** -- Tamper-proof QR codes generated per order, scannable by customers to confirm integrity
+- **Inventory Control** -- Stock automatically deducted on order approval with oversell prevention
+- **Audit Trail** -- All order status changes are logged with tracking events
 - **OTP Registration** -- Users verify via email OTP on signup; role upgrades require Admin approval
-- **Email Notifications** -- Nodemailer handles OTPs, role approvals, and private key delivery
+- **Email Notifications** -- Nodemailer handles OTPs, role approvals, and RSA private key delivery to suppliers
 
 ---
 
 ## Tech Stack
 
 **Frontend**
+
 - Next.js 14 (App Router)
 - TypeScript
 - Tailwind CSS
@@ -40,6 +77,7 @@ A full-stack multi-role supply chain platform that handles end-to-end order life
 - QR Code scanning and generation libraries
 
 **Backend**
+
 - Node.js + Express.js
 - Prisma ORM
 - MySQL
@@ -47,16 +85,6 @@ A full-stack multi-role supply chain platform that handles end-to-end order life
 - Nodemailer
 - Joi (request validation)
 - Helmet + CORS (security)
-
----
-
-## How It Works
-
-1. **Customer** places an order (status: `PENDING`)
-2. **Supplier** approves -- signs the order with their RSA private key, assigns a distributor, generates a QR token (status: `APPROVED`)
-3. **Distributor** accepts the leg, confirms receipt, and ships onward (status: `IN_PROGRESS`)
-4. If rejected at any point, the order returns to the supplier for reassignment
-5. **Customer** receives the package, scans the QR code to verify signatures, and confirms delivery (status: `DELIVERED`)
 
 ---
 
@@ -84,6 +112,7 @@ Supply-Chain/
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js v18+
 - MySQL database
 
@@ -136,8 +165,15 @@ npm run dev
 
 ---
 
+## License
+
+MIT
+
+---
+
 ## Author
 
 **Muhammad Fasih Ul Islam**
+
 - GitHub: [@Fasih-ulislam](https://github.com/Fasih-ulislam)
 - LinkedIn: [muhammad-fasih-cs](https://linkedin.com/in/muhammad-fasih-cs)
